@@ -597,7 +597,7 @@ export default function Home() {
     setAlarmExtractionError("");
     setAlarmExtraction(null);
 
-    const extractionStart = performance.now();
+    const extractionStart = getTelemetryNow();
 
     try {
       const response = await fetch("/api/extract-alarm", {
@@ -636,7 +636,7 @@ export default function Home() {
           severity: data.severity ?? "",
           manufacturer: data.manufacturer ?? "",
           model: data.model ?? "",
-          extractionDuration: Math.round(performance.now() - extractionStart)
+          extractionDuration: Math.round(getTelemetryNow() - extractionStart)
         });
       }
       setAlarmRawDirty(false);
@@ -696,7 +696,7 @@ export default function Home() {
     setRecentAlarmsDraftText("");
     setIsEditingRecentAlarmsSummary(false);
 
-    const extractionStart = performance.now();
+    const extractionStart = getTelemetryNow();
 
     try {
       const response = await fetch("/api/extract-recent-alarms", {
@@ -730,7 +730,7 @@ export default function Home() {
         pendo.track("recent_alarms_extraction_completed", {
           inputLength: trimmedInput.length,
           extractedRecordCount: data.records.length,
-          extractionDuration: Math.round(performance.now() - extractionStart)
+          extractionDuration: Math.round(getTelemetryNow() - extractionStart)
         });
       }
     } catch {
@@ -773,7 +773,7 @@ export default function Home() {
     setWorkRecordsDraftText("");
     setIsEditingWorkRecordsSummary(false);
 
-    const extractionStart = performance.now();
+    const extractionStart = getTelemetryNow();
 
     try {
       const response = await fetch("/api/extract-work-records", {
@@ -807,7 +807,7 @@ export default function Home() {
         pendo.track("work_records_extraction_completed", {
           inputLength: trimmedInput.length,
           extractedRecordCount: data.records.length,
-          extractionDuration: Math.round(performance.now() - extractionStart)
+          extractionDuration: Math.round(getTelemetryNow() - extractionStart)
         });
       }
     } catch {
@@ -850,7 +850,7 @@ export default function Home() {
     setOperatingContextDraftInput(emptyContextInput);
     setIsEditingOperatingContextSummary(false);
 
-    const extractionStart = performance.now();
+    const extractionStart = getTelemetryNow();
 
     try {
       const response = await fetch("/api/extract-operating-context", {
@@ -891,7 +891,7 @@ export default function Home() {
           hasWeather: Boolean(data.weather),
           hasProductionImpact: Boolean(data.productionImpactText),
           hasSafetyFlag: Boolean(data.safetyHseText),
-          extractionDuration: Math.round(performance.now() - extractionStart)
+          extractionDuration: Math.round(getTelemetryNow() - extractionStart)
         });
       }
     } catch {
@@ -1180,7 +1180,7 @@ export default function Home() {
     setDecisionState(initialDecisionState);
     setCopyStatus("Idle");
 
-    const generationStart = performance.now();
+    const generationStart = getTelemetryNow();
 
     try {
       const response = await fetch("/api/generate-brief", {
@@ -1221,7 +1221,7 @@ export default function Home() {
           hasRecentAlarms: normalizedInput.recentAlarms.length > 0,
           hasWorkRecords: normalizedInput.workRecords.length > 0,
           hasOperatingContext: Boolean(context.operatorNotes),
-          generationDuration: Math.round(performance.now() - generationStart)
+          generationDuration: Math.round(getTelemetryNow() - generationStart)
         });
       }
     } catch (error) {
@@ -1248,7 +1248,7 @@ export default function Home() {
     setCopyStatus("Idle");
     resetFeedbackState();
 
-    const generationStart = performance.now();
+    const generationStart = getTelemetryNow();
 
     try {
       const response = await fetch("/api/generate-note", {
@@ -1304,7 +1304,7 @@ export default function Home() {
           woReadiness: generatedBrief?.priority_wo_readiness.wo_readiness ?? "",
           mode: ruleDecision?.mode ?? "",
           contextCoverage: ruleDecision?.contextCoverage ?? "",
-          generationDuration: Math.round(performance.now() - generationStart)
+          generationDuration: Math.round(getTelemetryNow() - generationStart)
         });
       }
     } catch (error) {
@@ -1534,11 +1534,6 @@ export default function Home() {
           <p className="helperText">
             AlarmReady only runs local triage rules after extracted input is confirmed.
           </p>
-          <p className="publicDataNotice">
-            <Info aria-hidden="true" />
-            Use synthetic or non-confidential data only. Do not paste real customer, site, asset, or
-            confidential operational data.
-          </p>
           {demoDataLoaded ? <span className="demoBadge">Synthetic demo data loaded</span> : null}
         </div>
 
@@ -1569,6 +1564,14 @@ export default function Home() {
               <p className="helperText compact">
                 Uploaded or pasted data must be confirmed before use.
               </p>
+            </div>
+            <div className="dataSafetyHint">
+              <Info aria-hidden="true" />
+              <span>Use synthetic or non-confidential data only.</span>
+              <details>
+                <summary>Why?</summary>
+                <p>Do not paste real customer, site, asset, or confidential operational data.</p>
+              </details>
             </div>
             {alarmExtractionStatus === "Error" ? (
               <p className="errorText">{alarmExtractionError}</p>
@@ -2456,6 +2459,10 @@ function hasExtractedAlarmFaultCode(
     Boolean(draft.faultCode.trim()) ||
     /(?:fault\s*code|code|fault)\s*\d+/i.test(fields.alarmTextCode)
   );
+}
+
+function getTelemetryNow() {
+  return performance.now();
 }
 
 function formatDemoAlarmExport(fields: AlarmConfirmationFields) {
