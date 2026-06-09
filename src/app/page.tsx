@@ -1394,7 +1394,10 @@ export default function Home() {
         humanDecisionState: decisionState.selectedDecision,
         aiSuggestedDecision: generatedBrief?.suggested_next_move.recommended_decision_state ?? "",
         normalizedPriority: ruleDecision?.priority.normalizedPriority ?? "",
-        woReadiness: generatedBrief?.priority_wo_readiness.wo_readiness ?? ""
+        woReadiness: generatedBrief?.priority_wo_readiness.wo_readiness ?? "",
+        scenarioType: record.scenario_type ?? "",
+        appVersion: record.app_version ?? "",
+        promptVersion: record.prompt_version ?? ""
       });
     }
   };
