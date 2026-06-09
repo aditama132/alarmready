@@ -1330,7 +1330,7 @@ export default function Home() {
     }
   };
 
-  const saveFeedback = (useful: boolean, tags: FeedbackTag[], comment: string) => {
+  const saveFeedback = async (useful: boolean, tags: FeedbackTag[], comment: string) => {
     if (!workRecord || !generatedBrief || !ruleDecision || decisionState.selectedDecision === "") {
       return;
     }
@@ -1359,19 +1359,29 @@ export default function Home() {
       humanDecisionState: decisionState.selectedDecision,
       useful,
       tags,
-      comment
+      comment,
+      scenarioType: demoDataLoaded ? "context_rich_demo" : "custom"
     });
 
-    saveFeedbackRecord(record);
-    lastSavedFeedbackSignatureRef.current = signature;
-    setLastSavedFeedbackSignature(signature);
-    setFeedbackRecordCount(getFeedbackRecords().length);
-    setFeedbackStatus("Saved");
-    setFeedbackError("");
-    setDecisionState((current) => ({
-      ...current,
-      feedback: useful ? "Useful" : "Needs adjustment"
-    }));
+    try {
+      const storageMode = await saveFeedbackRecord(record);
+
+      lastSavedFeedbackSignatureRef.current = signature;
+      setLastSavedFeedbackSignature(signature);
+      setFeedbackRecordCount((current) =>
+        storageMode === "local" ? getFeedbackRecords().length : current
+      );
+      setFeedbackStatus("Saved");
+      setFeedbackError("");
+      setDecisionState((current) => ({
+        ...current,
+        feedback: useful ? "Useful" : "Needs adjustment"
+      }));
+    } catch (error) {
+      setFeedbackStatus("Error");
+      setFeedbackError(error instanceof Error ? error.message : "Failed to save feedback.");
+      return;
+    }
 
     if (typeof pendo !== "undefined") {
       pendo.track("feedback_submitted", {
@@ -1393,7 +1403,7 @@ export default function Home() {
     setFeedbackChoice("Useful");
     setFeedbackSelectedTags([]);
     setFeedbackComment("");
-    saveFeedback(true, [], "");
+    void saveFeedback(true, [], "");
   };
 
   const handleNeedsAdjustmentFeedback = () => {
@@ -1413,7 +1423,7 @@ export default function Home() {
   };
 
   const handleSaveNeedsAdjustmentFeedback = () => {
-    saveFeedback(false, feedbackSelectedTags, feedbackComment);
+    void saveFeedback(false, feedbackSelectedTags, feedbackComment);
   };
 
   const handleDownloadFeedback = () => {
@@ -2380,8 +2390,8 @@ export default function Home() {
                 />
               </label>
               <p className="helperText compact">
-                Comments are not stored verbatim. Local feedback saves only tags and privacy-safe
-                metadata.
+                Please do not include personal data, real site names, customer names, or
+                confidential operational details.
               </p>
 
               <div className="buttonRow feedbackActions">

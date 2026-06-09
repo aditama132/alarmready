@@ -37,9 +37,16 @@ LLM extraction, Diagnostic Brief generation, and Operational Note generation use
 ```bash
 OPENAI_API_KEY=
 FEEDBACK_STORAGE_MODE=
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
 ```
 
-Use `.env.example` as the template. `OPENAI_API_KEY` must stay server-side and must not be renamed with a `NEXT_PUBLIC_` prefix. `FEEDBACK_STORAGE_MODE` is a deployment placeholder for the current V0 local feedback storage behavior.
+Use `.env.example` as the template. `OPENAI_API_KEY` and `SUPABASE_SERVICE_ROLE_KEY` must stay server-side and must not be renamed with a `NEXT_PUBLIC_` prefix.
+
+Feedback storage modes:
+
+- `FEEDBACK_STORAGE_MODE=local` stores feedback only in the visitor's browser.
+- `FEEDBACK_STORAGE_MODE=supabase` sends privacy-safe feedback metadata to Supabase through `/api/feedback`.
 
 ## Public Deployment
 
@@ -47,6 +54,8 @@ Before sharing a public URL:
 
 - Run `npm run build` and confirm the production build passes.
 - Set `OPENAI_API_KEY` in the hosting provider's server-side environment settings.
+- For central feedback collection, set `FEEDBACK_STORAGE_MODE=supabase`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY` in Vercel Project Settings.
+- Redeploy after changing Vercel environment variables.
 - Keep `.env.local` out of git. The repository includes `.env.example` for safe configuration documentation.
 - Use synthetic or non-confidential data only. Do not paste real customer, site, asset, or confidential operational data into a public demo.
 - Confirm the full synthetic flow works: load the Context-Rich Example, extract and confirm each section, review Triage Checks, generate the Pre-WO Diagnostic Brief, choose a human decision, generate the Operational Note, and submit feedback.
@@ -75,9 +84,59 @@ It does not diagnose faults, replace the OEM manual, replace site procedure, rep
 
 ## Feedback Privacy
 
-V0 feedback is stored in browser `localStorage` under `alarmready_feedback_v1`. It stores only privacy-safe feedback metadata: usefulness, issue tags, whether a comment was provided, comment length, context level, selected human decision, suggested decision state, normalized priority, and WO readiness.
+Feedback stores only privacy-safe fields: usefulness, issue tags, optional comment, context level, selected human decision, suggested decision state, normalized priority, WO readiness, scenario type, app version, and prompt version.
 
 Feedback does not store user identity, raw alarm text, site names, asset names, generated brief snapshots, or generated note snapshots.
+
+## Retrieving Feedback
+
+Local mode stores feedback only in each visitor's browser `localStorage` under `alarmready_feedback_v1`; it is not centrally retrievable.
+
+Supabase mode stores privacy-safe feedback in the `alarmready_feedback` table. Feedback can be reviewed or exported from the Supabase dashboard.
+
+Suggested table shape:
+
+```sql
+create table if not exists alarmready_feedback (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  useful boolean,
+  tags text[] not null default '{}',
+  comment text,
+  context_level text check (context_level in ('low', 'partial', 'high')),
+  human_decision_state text check (
+    human_decision_state in (
+      'monitor',
+      'remote_verify',
+      'update_existing_wo',
+      'create_new_wo',
+      'escalate',
+      'defer',
+      'false_not_actionable'
+    )
+  ),
+  normalized_priority text check (normalized_priority in ('low', 'medium', 'high')),
+  wo_readiness text,
+  ai_suggested_decision_state text,
+  scenario_type text check (scenario_type in ('context_rich_demo', 'custom')),
+  app_version text,
+  prompt_version text
+);
+```
+
+The app intentionally does not store user identity, raw alarm data, site names, asset names, or generated output snapshots.
+
+## Vercel Feedback Setup
+
+Configure these variables in Vercel Project Settings:
+
+```bash
+FEEDBACK_STORAGE_MODE=supabase
+SUPABASE_URL=...
+SUPABASE_SERVICE_ROLE_KEY=...
+```
+
+Redeploy the project after saving environment variable changes. `SUPABASE_SERVICE_ROLE_KEY` is used only by server routes and must never be exposed client-side.
 
 ## Novus.ai Readiness
 

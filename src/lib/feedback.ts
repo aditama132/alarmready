@@ -17,21 +17,25 @@ export const feedbackTags = [
 ] as const;
 
 export type FeedbackTag = (typeof feedbackTags)[number];
+export type FeedbackContextLevel = "low" | "partial" | "high";
+export type FeedbackScenarioType = "context_rich_demo" | "custom";
+export type FeedbackStorageMode = "local" | "supabase";
+
+export const feedbackAppVersion = "0.1.0";
+export const feedbackPromptVersion = "pre-wo-v1";
 
 export type FeedbackRecord = {
-  id: string;
-  created_at: string;
-  schema_version: 2;
   useful: boolean | null;
   tags: string[];
-  comment_provided: boolean;
-  comment_length: number;
-  mode: "quick" | "context_aware";
-  context_coverage: "low" | "medium" | "high";
-  human_decision_state: HumanDecisionState;
-  ai_suggested_decision_state: HumanDecisionState | "unknown";
-  normalized_priority: string;
-  wo_readiness: string;
+  comment?: string;
+  context_level?: FeedbackContextLevel;
+  human_decision_state?: HumanDecisionState;
+  normalized_priority?: "low" | "medium" | "high";
+  wo_readiness?: string;
+  ai_suggested_decision_state?: HumanDecisionState | "unknown";
+  scenario_type?: FeedbackScenarioType;
+  app_version?: string;
+  prompt_version?: string;
 };
 
 type CreateFeedbackRecordInput = {
@@ -41,38 +45,40 @@ type CreateFeedbackRecordInput = {
   useful: boolean | null;
   tags: string[];
   comment: string;
+  scenarioType: FeedbackScenarioType;
 };
 
 export function createFeedbackRecord(input: CreateFeedbackRecordInput): FeedbackRecord {
-  const createdAt = new Date().toISOString();
-
   return {
-    id: `feedback-${createdAt.replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random()
-      .toString(36)
-      .slice(2, 8)}`,
-    created_at: createdAt,
-    schema_version: 2,
     useful: input.useful,
     tags: [...input.tags],
-    comment_provided: input.comment.trim().length > 0,
-    comment_length: input.comment.trim().length,
-    mode: input.ruleEngineOutput.mode,
-    context_coverage: input.ruleEngineOutput.contextCoverage,
+    ...(input.comment.trim() ? { comment: input.comment.trim() } : {}),
+    context_level: mapContextCoverage(input.ruleEngineOutput.contextCoverage),
     human_decision_state: input.humanDecisionState,
     ai_suggested_decision_state:
       input.generatedBrief.suggested_next_move.recommended_decision_state ?? "unknown",
-    normalized_priority: input.generatedBrief.priority_wo_readiness.normalized_priority,
-    wo_readiness: input.generatedBrief.priority_wo_readiness.wo_readiness
+    normalized_priority: input.ruleEngineOutput.priority.normalizedPriority,
+    wo_readiness: input.generatedBrief.priority_wo_readiness.wo_readiness,
+    scenario_type: input.scenarioType,
+    app_version: feedbackAppVersion,
+    prompt_version: feedbackPromptVersion
   };
 }
 
-export function saveFeedbackRecord(record: FeedbackRecord) {
+export async function saveFeedbackRecord(record: FeedbackRecord): Promise<FeedbackStorageMode> {
+  const serverResult = await saveFeedbackRecordToServer(record);
+
+  if (serverResult === "supabase") {
+    return "supabase";
+  }
+
   if (!canUseLocalStorage()) {
-    return;
+    return "local";
   }
 
   const records = getFeedbackRecords();
   window.localStorage.setItem(feedbackStorageKey, JSON.stringify([...records, record]));
+  return "local";
 }
 
 export function getFeedbackRecords(): FeedbackRecord[] {
@@ -116,23 +122,87 @@ function isFeedbackRecord(value: unknown): value is FeedbackRecord {
   }
 
   return (
-    typeof value.id === "string" &&
-    typeof value.created_at === "string" &&
-    value.schema_version === 2 &&
     (typeof value.useful === "boolean" || value.useful === null) &&
     Array.isArray(value.tags) &&
     value.tags.every((tag) => typeof tag === "string") &&
-    typeof value.comment_provided === "boolean" &&
-    typeof value.comment_length === "number" &&
-    (value.mode === "quick" || value.mode === "context_aware") &&
-    (value.context_coverage === "low" ||
-      value.context_coverage === "medium" ||
-      value.context_coverage === "high") &&
-    typeof value.human_decision_state === "string" &&
-    typeof value.ai_suggested_decision_state === "string" &&
-    typeof value.normalized_priority === "string" &&
-    typeof value.wo_readiness === "string"
+    isOptionalString(value.comment) &&
+    isOptionalContextLevel(value.context_level) &&
+    isOptionalHumanDecisionState(value.human_decision_state) &&
+    isOptionalPriority(value.normalized_priority) &&
+    isOptionalString(value.wo_readiness) &&
+    isOptionalString(value.ai_suggested_decision_state) &&
+    isOptionalScenarioType(value.scenario_type) &&
+    isOptionalString(value.app_version) &&
+    isOptionalString(value.prompt_version)
   );
+}
+
+async function saveFeedbackRecordToServer(record: FeedbackRecord) {
+  try {
+    const response = await fetch("/api/feedback", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(record)
+    });
+    const data = (await response.json().catch(() => null)) as unknown;
+
+    if (!response.ok) {
+      throw new Error(getFeedbackApiErrorMessage(data));
+    }
+
+    if (isRecord(data) && data.storageMode === "supabase") {
+      return "supabase" as const;
+    }
+  } catch (error) {
+    throw error instanceof Error
+      ? error
+      : new Error("Failed to save feedback.");
+  }
+
+  return "local" as const;
+}
+
+function mapContextCoverage(value: RuleEngineDecision["contextCoverage"]): FeedbackContextLevel {
+  return value === "medium" ? "partial" : value;
+}
+
+function getFeedbackApiErrorMessage(value: unknown) {
+  if (isRecord(value) && typeof value.error === "string") {
+    return value.error;
+  }
+
+  return "Failed to save feedback.";
+}
+
+function isOptionalString(value: unknown) {
+  return value === undefined || typeof value === "string";
+}
+
+function isOptionalContextLevel(value: unknown) {
+  return value === undefined || value === "low" || value === "partial" || value === "high";
+}
+
+function isOptionalHumanDecisionState(value: unknown) {
+  return (
+    value === undefined ||
+    value === "monitor" ||
+    value === "remote_verify" ||
+    value === "update_existing_wo" ||
+    value === "create_new_wo" ||
+    value === "escalate" ||
+    value === "defer" ||
+    value === "false_not_actionable"
+  );
+}
+
+function isOptionalPriority(value: unknown) {
+  return value === undefined || value === "low" || value === "medium" || value === "high";
+}
+
+function isOptionalScenarioType(value: unknown) {
+  return value === undefined || value === "context_rich_demo" || value === "custom";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
