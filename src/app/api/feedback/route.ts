@@ -67,6 +67,16 @@ const forbiddenFields = new Set([
   "alarm_summary"
 ]);
 
+export function GET() {
+  const storageMode = getFeedbackStorageMode();
+
+  if (storageMode instanceof Error) {
+    return NextResponse.json({ error: storageMode.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ storageMode });
+}
+
 export async function POST(request: Request) {
   let payload: FeedbackPayload;
 

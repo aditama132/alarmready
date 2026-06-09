@@ -30,7 +30,7 @@ import {
   getFeedbackRecords,
   saveFeedbackRecord
 } from "@/lib/feedback";
-import type { FeedbackTag } from "@/lib/feedback";
+import type { FeedbackStorageMode, FeedbackTag } from "@/lib/feedback";
 import {
   applyOperatingContextExtraction,
   emptyAlarmExtractionDraftFields,
@@ -190,6 +190,9 @@ export default function Home() {
   const [lastSavedFeedbackSignature, setLastSavedFeedbackSignature] = useState("");
   const lastSavedFeedbackSignatureRef = useRef("");
   const [feedbackRecordCount, setFeedbackRecordCount] = useState(0);
+  const [feedbackStorageMode, setFeedbackStorageMode] =
+    useState<FeedbackStorageMode | "unknown">("unknown");
+  const [supabaseFeedbackSessionCount, setSupabaseFeedbackSessionCount] = useState(0);
   const [demoDataLoaded, setDemoDataLoaded] = useState(false);
   const [isOptionalContextExpanded, setIsOptionalContextExpanded] = useState(false);
   const [isRecentAlarmsExpanded, setIsRecentAlarmsExpanded] = useState(false);
@@ -397,6 +400,29 @@ export default function Home() {
     });
 
     return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    fetch("/api/feedback")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: unknown) => {
+        if (!isMounted || !isFeedbackStorageModeResponse(data)) {
+          return;
+        }
+
+        setFeedbackStorageMode(data.storageMode);
+      })
+      .catch(() => {
+        if (isMounted) {
+          setFeedbackStorageMode("local");
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const resetFeedbackState = () => {
@@ -1368,9 +1394,13 @@ export default function Home() {
 
       lastSavedFeedbackSignatureRef.current = signature;
       setLastSavedFeedbackSignature(signature);
+      setFeedbackStorageMode(storageMode);
       setFeedbackRecordCount((current) =>
         storageMode === "local" ? getFeedbackRecords().length : current
       );
+      if (storageMode === "supabase") {
+        setSupabaseFeedbackSessionCount((current) => current + 1);
+      }
       setFeedbackStatus("Saved");
       setFeedbackError("");
       setDecisionState((current) => ({
@@ -1457,6 +1487,7 @@ export default function Home() {
     setFeedbackError("");
     setLastSavedFeedbackSignature("");
     lastSavedFeedbackSignatureRef.current = "";
+    setSupabaseFeedbackSessionCount(0);
     setDecisionState((current) => ({
       ...current,
       feedback: null
@@ -2415,6 +2446,15 @@ export default function Home() {
             </div>
           ) : null}
 
+          <p className="helperText compact">
+            {getFeedbackStorageHelperText(feedbackStorageMode)}
+          </p>
+          {feedbackStorageMode === "supabase" && supabaseFeedbackSessionCount > 0 ? (
+            <p className="helperText compact">
+              Submitted this session: {supabaseFeedbackSessionCount}
+            </p>
+          ) : null}
+
           {feedbackStatus === "Saved" ? (
             <p className="feedbackSaved">Feedback saved. Thank you.</p>
           ) : null}
@@ -2424,15 +2464,23 @@ export default function Home() {
             <details className="feedbackLog">
               <summary>Feedback log</summary>
               <div className="feedbackLogBody">
-                <span>{feedbackRecordCount} feedback records</span>
-                <button type="button" className="secondaryButton" onClick={handleDownloadFeedback}>
-                  <Download aria-hidden="true" />
-                  Download feedback JSON
-                </button>
-                <button type="button" className="ghostButton" onClick={handleClearFeedback}>
-                  <Trash2 aria-hidden="true" />
-                  Clear feedback
-                </button>
+                {feedbackStorageMode === "supabase" ? (
+                  <span>Supabase mode: retrieve feedback from the Supabase dashboard.</span>
+                ) : feedbackStorageMode === "local" ? (
+                  <>
+                    <span>{feedbackRecordCount} local feedback records</span>
+                    <button type="button" className="secondaryButton" onClick={handleDownloadFeedback}>
+                      <Download aria-hidden="true" />
+                      Download feedback JSON
+                    </button>
+                    <button type="button" className="ghostButton" onClick={handleClearFeedback}>
+                      <Trash2 aria-hidden="true" />
+                      Clear feedback
+                    </button>
+                  </>
+                ) : (
+                  <span>Checking feedback storage mode.</span>
+                )}
               </div>
             </details>
           ) : null}
@@ -2462,6 +2510,28 @@ function getFeedbackSignature({
     commentProvided: comment.trim().length > 0,
     commentLength: comment.trim().length
   });
+}
+
+function getFeedbackStorageHelperText(mode: FeedbackStorageMode | "unknown") {
+  if (mode === "supabase") {
+    return "Feedback is stored centrally without user identity or raw operational data.";
+  }
+
+  if (mode === "local") {
+    return "Feedback is stored in this browser for local testing.";
+  }
+
+  return "Feedback storage mode is being checked.";
+}
+
+function isFeedbackStorageModeResponse(value: unknown): value is { storageMode: FeedbackStorageMode } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "storageMode" in value &&
+    ((value as { storageMode: unknown }).storageMode === "local" ||
+      (value as { storageMode: unknown }).storageMode === "supabase")
+  );
 }
 
 function hasExtractedAlarmFaultCode(
