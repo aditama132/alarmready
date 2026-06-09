@@ -233,29 +233,6 @@ button svg {
   margin: 0;
 }
 
-.publicDataNotice {
-  display: inline-flex;
-  align-items: flex-start;
-  gap: 8px;
-  max-width: 760px;
-  margin: 0;
-  border: 1px solid rgba(196, 76, 53, 0.28);
-  border-radius: 8px;
-  background: #fff7f1;
-  color: #7d2d1f;
-  padding: 10px 12px;
-  font-size: 0.92rem;
-  font-weight: 800;
-  line-height: 1.45;
-}
-
-.publicDataNotice svg {
-  width: 17px;
-  height: 17px;
-  margin-top: 1px;
-  flex: 0 0 auto;
-}
-
 .demoBadge {
   border: 1px solid #d4e4df;
   border-radius: 999px;
@@ -440,6 +417,54 @@ textarea:focus {
   gap: 12px;
   align-items: center;
   justify-content: space-between;
+}
+
+.dataSafetyHint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.dataSafetyHint svg {
+  width: 15px;
+  height: 15px;
+  color: var(--teal-dark);
+  flex: 0 0 auto;
+}
+
+.dataSafetyHint details {
+  position: relative;
+}
+
+.dataSafetyHint summary {
+  display: inline-flex;
+  cursor: pointer;
+  color: var(--teal-dark);
+  font-weight: 900;
+  list-style: none;
+}
+
+.dataSafetyHint summary::-webkit-details-marker {
+  display: none;
+}
+
+.dataSafetyHint details[open] p {
+  position: absolute;
+  z-index: 10;
+  left: 0;
+  top: calc(100% + 6px);
+  width: min(300px, 82vw);
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: var(--shadow);
+  color: var(--text);
+  padding: 10px 12px;
 }
 
 .collapsibleCard {
