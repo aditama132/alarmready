@@ -1,4 +1,9 @@
-export function getRequiredServerEnv(name: "OPENAI_API_KEY") {
+type RequiredServerEnvName =
+  | "OPENAI_API_KEY"
+  | "SUPABASE_URL"
+  | "SUPABASE_SERVICE_ROLE_KEY";
+
+export function getRequiredServerEnv(name: RequiredServerEnvName) {
   const value = process.env[name]?.trim();
 
   if (!value) {

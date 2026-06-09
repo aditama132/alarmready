@@ -421,50 +421,24 @@ textarea:focus {
 
 .dataSafetyHint {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 0.84rem;
-  line-height: 1.45;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid rgba(180, 127, 38, 0.28);
+  border-radius: 8px;
+  background: #fff9ed;
+  color: #6d4c10;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  font-weight: 800;
+  line-height: 1.4;
 }
 
 .dataSafetyHint svg {
   width: 15px;
   height: 15px;
-  color: var(--teal-dark);
+  margin-top: 2px;
+  color: #9a6a12;
   flex: 0 0 auto;
-}
-
-.dataSafetyHint details {
-  position: relative;
-}
-
-.dataSafetyHint summary {
-  display: inline-flex;
-  cursor: pointer;
-  color: var(--teal-dark);
-  font-weight: 900;
-  list-style: none;
-}
-
-.dataSafetyHint summary::-webkit-details-marker {
-  display: none;
-}
-
-.dataSafetyHint details[open] p {
-  position: absolute;
-  z-index: 10;
-  left: 0;
-  top: calc(100% + 6px);
-  width: min(300px, 82vw);
-  margin: 0;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: var(--shadow);
-  color: var(--text);
-  padding: 10px 12px;
 }
 
 .collapsibleCard {
