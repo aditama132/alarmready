@@ -198,6 +198,10 @@ export default function Home() {
 
   const manualValidation = validateAlarmFields(manualFields);
   const extractedValidation = validateAlarmFields(extractedFields);
+  const extractedAlarmHasFaultCode = hasExtractedAlarmFaultCode(
+    alarmExtractionDraft,
+    extractedFields
+  );
   const activeAlarmFields =
     inputMode === "manual"
       ? manualFields
@@ -593,6 +597,8 @@ export default function Home() {
     setAlarmExtractionError("");
     setAlarmExtraction(null);
 
+    const extractionStart = performance.now();
+
     try {
       const response = await fetch("/api/extract-alarm", {
         method: "POST",
@@ -620,6 +626,19 @@ export default function Home() {
       setExtractedConfirmed(false);
       setAlarmExtractionStatus("Idle");
       setAlarmExtractionWorkflowStatus("extracted_needs_confirmation");
+
+      if (typeof pendo !== "undefined") {
+        pendo.track("alarm_extraction_completed", {
+          inputLength: trimmedInput.length,
+          confidence: data.confidence,
+          missingFieldsCount: data.missingFields.length,
+          hasFaultCode: Boolean(data.faultCode),
+          severity: data.severity ?? "",
+          manufacturer: data.manufacturer ?? "",
+          model: data.model ?? "",
+          extractionDuration: Math.round(performance.now() - extractionStart)
+        });
+      }
       setAlarmRawDirty(false);
       setLastExtractedAlarmSignature(getRawInputSignature(trimmedInput));
       resetDownstream();
@@ -649,6 +668,14 @@ export default function Home() {
     setAlarmRawDirty(Boolean(text.trim()));
     setDemoDataLoaded(false);
     resetDownstream();
+
+    if (typeof pendo !== "undefined") {
+      pendo.track("alarm_file_uploaded", {
+        fileName,
+        fileSize: text.length,
+        fileType: fileName.split(".").pop() ?? ""
+      });
+    }
   };
 
   const extractRecentAlarmsInput = async (input = contextInput.recentAlarmsText) => {
@@ -668,6 +695,8 @@ export default function Home() {
     setRecentAlarmsExtractionWorkflowStatus("extracting");
     setRecentAlarmsDraftText("");
     setIsEditingRecentAlarmsSummary(false);
+
+    const extractionStart = performance.now();
 
     try {
       const response = await fetch("/api/extract-recent-alarms", {
@@ -696,6 +725,14 @@ export default function Home() {
       setIsOptionalContextExpanded(true);
       setIsRecentAlarmsExpanded(true);
       resetDownstream();
+
+      if (typeof pendo !== "undefined") {
+        pendo.track("recent_alarms_extraction_completed", {
+          inputLength: trimmedInput.length,
+          extractedRecordCount: data.records.length,
+          extractionDuration: Math.round(performance.now() - extractionStart)
+        });
+      }
     } catch {
       setRecentAlarmsExtractionStatus("Error");
       setRecentAlarmsExtractionWorkflowStatus(
@@ -710,6 +747,12 @@ export default function Home() {
 
   const handleRecentAlarmsFileLoaded = async (text: string) => {
     updateContext("recentAlarmsText", text);
+
+    if (typeof pendo !== "undefined") {
+      pendo.track("recent_alarms_file_uploaded", {
+        fileSize: text.length
+      });
+    }
   };
 
   const extractWorkRecordsInput = async (input = contextInput.relatedWorkRecordsText) => {
@@ -729,6 +772,8 @@ export default function Home() {
     setWorkRecordsExtractionWorkflowStatus("extracting");
     setWorkRecordsDraftText("");
     setIsEditingWorkRecordsSummary(false);
+
+    const extractionStart = performance.now();
 
     try {
       const response = await fetch("/api/extract-work-records", {
@@ -757,6 +802,14 @@ export default function Home() {
       setIsOptionalContextExpanded(true);
       setIsWorkRecordsExpanded(true);
       resetDownstream();
+
+      if (typeof pendo !== "undefined") {
+        pendo.track("work_records_extraction_completed", {
+          inputLength: trimmedInput.length,
+          extractedRecordCount: data.records.length,
+          extractionDuration: Math.round(performance.now() - extractionStart)
+        });
+      }
     } catch {
       setWorkRecordsExtractionStatus("Error");
       setWorkRecordsExtractionWorkflowStatus(
@@ -771,6 +824,12 @@ export default function Home() {
 
   const handleWorkRecordsFileLoaded = async (text: string) => {
     updateContext("relatedWorkRecordsText", text);
+
+    if (typeof pendo !== "undefined") {
+      pendo.track("work_records_file_uploaded", {
+        fileSize: text.length
+      });
+    }
   };
 
   const extractOperatingContextInput = async (input = getOperatingContextRawText(contextInput)) => {
@@ -790,6 +849,8 @@ export default function Home() {
     setOperatingContextExtractionWorkflowStatus("extracting");
     setOperatingContextDraftInput(emptyContextInput);
     setIsEditingOperatingContextSummary(false);
+
+    const extractionStart = performance.now();
 
     try {
       const response = await fetch("/api/extract-operating-context", {
@@ -821,6 +882,18 @@ export default function Home() {
       setIsOptionalContextExpanded(true);
       setIsOperatingContextExpanded(true);
       resetDownstream();
+
+      if (typeof pendo !== "undefined") {
+        pendo.track("operating_context_extraction_completed", {
+          inputLength: trimmedInput.length,
+          chipsCount: contextInput.chips.length,
+          chipsSelected: contextInput.chips.join(","),
+          hasWeather: Boolean(data.weather),
+          hasProductionImpact: Boolean(data.productionImpactText),
+          hasSafetyFlag: Boolean(data.safetyHseText),
+          extractionDuration: Math.round(performance.now() - extractionStart)
+        });
+      }
     } catch {
       setOperatingContextExtractionStatus("Error");
       setOperatingContextExtractionWorkflowStatus(
@@ -835,6 +908,12 @@ export default function Home() {
 
   const handleOperatingContextFileLoaded = async (text: string) => {
     updateContext("siteOperatingContext", text);
+
+    if (typeof pendo !== "undefined") {
+      pendo.track("operating_context_file_uploaded", {
+        fileSize: text.length
+      });
+    }
   };
 
   const toggleContextChip = (chip: OperatingContextChip) => {
@@ -886,6 +965,23 @@ export default function Home() {
     setExtractedConfirmed(true);
     setAlarmExtractionWorkflowStatus("confirmed");
     resetDownstream();
+
+    if (typeof pendo !== "undefined") {
+      const wasEdited = alarmExtractionWorkflowStatus === "edited_needs_confirmation";
+      pendo.track("alarm_fields_confirmed", {
+        inputMode: "extracted",
+        wasEdited,
+        hasFaultCode: Boolean(
+          alarmExtractionDraft?.faultCode ||
+            /(?:fault\s*code|code|fault)\s*\d+/i.test(extractedFields.alarmTextCode ?? "")
+        ),
+        severity: extractedFields.severity,
+        manufacturer: alarmExtractionDraft.manufacturer,
+        model: alarmExtractionDraft.model,
+        sitePlant: alarmExtractionDraft.sitePlant,
+        fieldsEditedCount: wasEdited ? 1 : 0
+      });
+    }
   };
 
   const cancelExtractedAlarm = () => {
@@ -904,6 +1000,13 @@ export default function Home() {
   const useExtractedRecentAlarms = () => {
     if (!isExtractionConfirmable(recentAlarmsExtractionWorkflowStatus)) {
       return;
+    }
+
+    if (typeof pendo !== "undefined") {
+      pendo.track("recent_alarms_confirmed", {
+        wasEdited: recentAlarmsExtractionWorkflowStatus === "edited_needs_confirmation",
+        recordCount: recentAlarmsExtraction?.records.length ?? 0
+      });
     }
 
     setContextInput((current) => ({
@@ -931,6 +1034,13 @@ export default function Home() {
   const useExtractedWorkRecords = () => {
     if (!isExtractionConfirmable(workRecordsExtractionWorkflowStatus)) {
       return;
+    }
+
+    if (typeof pendo !== "undefined") {
+      pendo.track("work_records_confirmed", {
+        wasEdited: workRecordsExtractionWorkflowStatus === "edited_needs_confirmation",
+        recordCount: workRecordsExtraction?.records.length ?? 0
+      });
     }
 
     setContextInput((current) => ({
@@ -972,6 +1082,18 @@ export default function Home() {
   const useExtractedOperatingContext = () => {
     if (!isExtractionConfirmable(operatingContextExtractionWorkflowStatus)) {
       return;
+    }
+
+    if (typeof pendo !== "undefined") {
+      pendo.track("operating_context_confirmed", {
+        wasEdited: operatingContextExtractionWorkflowStatus === "edited_needs_confirmation",
+        hasWeather: Boolean(operatingContextDraftInput.siteOperatingContext),
+        hasProductionImpact: Boolean(operatingContextDraftInput.estimatedImpact),
+        hasSlaNote: Boolean(operatingContextDraftInput.slaNote),
+        hasSafetyNote: Boolean(operatingContextDraftInput.safetyHseNote),
+        hasAccessConstraint: Boolean(operatingContextDraftInput.accessConstraintNote),
+        chipsCount: operatingContextDraftInput.chips.length
+      });
     }
 
     setContextInput({
@@ -1037,6 +1159,12 @@ export default function Home() {
     setIsWorkRecordsExpanded(true);
     setIsOperatingContextExpanded(true);
     setDemoDataLoaded(true);
+
+    if (typeof pendo !== "undefined") {
+      pendo.track("demo_scenario_loaded", {
+        scenarioType: "contextAwareExample"
+      });
+    }
   };
 
   const handleGenerateBrief = async () => {
@@ -1051,6 +1179,8 @@ export default function Home() {
     setWorkRecord(null);
     setDecisionState(initialDecisionState);
     setCopyStatus("Idle");
+
+    const generationStart = performance.now();
 
     try {
       const response = await fetch("/api/generate-brief", {
@@ -1079,6 +1209,21 @@ export default function Home() {
       setGeneratedBrief(data);
       setBrief(mapGeneratedBriefToDiagnosticBrief(data, ruleDecision));
       setBriefStatus("Idle");
+
+      if (typeof pendo !== "undefined") {
+        pendo.track("diagnostic_brief_generated", {
+          mode: ruleDecision.mode,
+          contextCoverage: ruleDecision.contextCoverage,
+          normalizedPriority: data.priority_wo_readiness.normalized_priority,
+          woReadiness: data.priority_wo_readiness.wo_readiness,
+          suggestedDecision: data.suggested_next_move.recommended_decision_state ?? "",
+          missingChecksCount: data.missing_checks.length,
+          hasRecentAlarms: normalizedInput.recentAlarms.length > 0,
+          hasWorkRecords: normalizedInput.workRecords.length > 0,
+          hasOperatingContext: Boolean(context.operatorNotes),
+          generationDuration: Math.round(performance.now() - generationStart)
+        });
+      }
     } catch (error) {
       setBriefStatus("Error");
       setBriefError(error instanceof Error ? error.message : "Failed to generate the brief.");
@@ -1102,6 +1247,8 @@ export default function Home() {
     setWorkRecord(null);
     setCopyStatus("Idle");
     resetFeedbackState();
+
+    const generationStart = performance.now();
 
     try {
       const response = await fetch("/api/generate-note", {
@@ -1145,6 +1292,21 @@ export default function Home() {
         operationalNote: nextRecord.operationalNote
       }));
       setNoteStatus("Idle");
+
+      if (typeof pendo !== "undefined") {
+        pendo.track("operational_note_generated", {
+          selectedDecision: decisionState.selectedDecision,
+          aiSuggestedDecision: generatedBrief?.suggested_next_move.recommended_decision_state ?? "",
+          decisionAlignmentStatus: decisionAlignment?.alignment ?? "",
+          hasValidationNote: Boolean(decisionState.validationNote.trim()),
+          validationNoteLength: decisionState.validationNote.length,
+          normalizedPriority: ruleDecision?.priority.normalizedPriority ?? "",
+          woReadiness: generatedBrief?.priority_wo_readiness.wo_readiness ?? "",
+          mode: ruleDecision?.mode ?? "",
+          contextCoverage: ruleDecision?.contextCoverage ?? "",
+          generationDuration: Math.round(performance.now() - generationStart)
+        });
+      }
     } catch (error) {
       setNoteStatus("Error");
       setNoteError(error instanceof Error ? error.message : "Failed to generate the operational note.");
@@ -1158,6 +1320,14 @@ export default function Home() {
 
     const copied = await copyToClipboard(workRecord.operationalNote);
     setCopyStatus(copied ? "Copied" : "Copy failed");
+
+    if (typeof pendo !== "undefined") {
+      pendo.track("operational_note_copied", {
+        copySuccess: copied,
+        noteLength: workRecord.operationalNote.length,
+        selectedDecision: decisionState.selectedDecision
+      });
+    }
   };
 
   const saveFeedback = (useful: boolean, tags: FeedbackTag[], comment: string) => {
@@ -1202,6 +1372,21 @@ export default function Home() {
       ...current,
       feedback: useful ? "Useful" : "Needs adjustment"
     }));
+
+    if (typeof pendo !== "undefined") {
+      pendo.track("feedback_submitted", {
+        useful,
+        tags: tags.join(","),
+        commentProvided: Boolean(comment.trim()),
+        commentLength: comment.length,
+        mode: ruleDecision?.mode ?? "",
+        contextCoverage: ruleDecision?.contextCoverage ?? "",
+        humanDecisionState: decisionState.selectedDecision,
+        aiSuggestedDecision: generatedBrief?.suggested_next_move.recommended_decision_state ?? "",
+        normalizedPriority: ruleDecision?.priority.normalizedPriority ?? "",
+        woReadiness: generatedBrief?.priority_wo_readiness.wo_readiness ?? ""
+      });
+    }
   };
 
   const handleUsefulFeedback = () => {
@@ -1241,9 +1426,18 @@ export default function Home() {
     link.download = `alarmready-feedback-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
     window.URL.revokeObjectURL(url);
+
+    if (typeof pendo !== "undefined") {
+      pendo.track("feedback_exported", {
+        feedbackRecordCount,
+        exportDate: new Date().toISOString().slice(0, 10)
+      });
+    }
   };
 
   const handleClearFeedback = () => {
+    const clearedCount = feedbackRecordCount;
+
     clearFeedbackRecords();
     setFeedbackRecordCount(0);
     setFeedbackStatus("Idle");
@@ -1254,6 +1448,12 @@ export default function Home() {
       ...current,
       feedback: null
     }));
+
+    if (typeof pendo !== "undefined") {
+      pendo.track("feedback_cleared", {
+        clearedRecordCount: clearedCount
+      });
+    }
   };
 
   const clearOperationalNoteState = () => {
@@ -1271,6 +1471,17 @@ export default function Home() {
       operationalNote: ""
     }));
     clearOperationalNoteState();
+
+    if (typeof pendo !== "undefined" && selectedDecision) {
+      const aiSuggested = generatedBrief?.suggested_next_move.recommended_decision_state ?? "";
+      pendo.track("human_decision_selected", {
+        selectedDecision,
+        aiSuggestedDecision: aiSuggested,
+        decisionAlignmentStatus: selectedDecision === aiSuggested ? "aligned" : "mismatch",
+        normalizedPriority: generatedBrief?.priority_wo_readiness.normalized_priority ?? "",
+        woReadiness: generatedBrief?.priority_wo_readiness.wo_readiness ?? ""
+      });
+    }
   };
 
   const updateHumanDecisionReason = (validationNote: string) => {
@@ -1429,7 +1640,11 @@ export default function Home() {
         </div>
 
         {inputMode === "extracted" ? (
-          <section className="confirmationCard inlineConfirmation" aria-labelledby="confirm-heading">
+          <section
+            className="confirmationCard inlineConfirmation"
+            aria-labelledby="confirm-heading"
+            data-has-fault-code={extractedAlarmHasFaultCode ? "true" : "false"}
+          >
             <div className="compactHeader">
               <div>
                 <p className="stepKicker">Extracted fields</p>
@@ -2056,6 +2271,18 @@ export default function Home() {
             type="button"
             className="ghostButton"
             onClick={() => {
+              if (typeof pendo !== "undefined") {
+                pendo.track("workflow_reset", {
+                  hadAlarmInput: Boolean(rawAlarmInput.trim()),
+                  hadContextInput: hasOperatingContextInput(contextInput) || hasRecentAlarmsRawInput || hasWorkRecordsRawInput,
+                  hadBrief: Boolean(brief),
+                  hadDecision: hasSelectedDecision,
+                  hadOperationalNote: Boolean(workRecord),
+                  hadFeedback: Boolean(lastSavedFeedbackSignature),
+                  demoDataLoaded
+                });
+              }
+
               setRawAlarmInput("");
               setAlarmFileName("");
               setInputMode("none");
@@ -2219,6 +2446,16 @@ function getFeedbackSignature({
     commentProvided: comment.trim().length > 0,
     commentLength: comment.trim().length
   });
+}
+
+function hasExtractedAlarmFaultCode(
+  draft: Pick<AlarmExtractionDraftFields, "faultCode">,
+  fields: Pick<AlarmConfirmationFields, "alarmTextCode">
+) {
+  return (
+    Boolean(draft.faultCode.trim()) ||
+    /(?:fault\s*code|code|fault)\s*\d+/i.test(fields.alarmTextCode)
+  );
 }
 
 function formatDemoAlarmExport(fields: AlarmConfirmationFields) {
