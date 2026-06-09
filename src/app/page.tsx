@@ -198,6 +198,10 @@ export default function Home() {
 
   const manualValidation = validateAlarmFields(manualFields);
   const extractedValidation = validateAlarmFields(extractedFields);
+  const extractedAlarmHasFaultCode = hasExtractedAlarmFaultCode(
+    alarmExtractionDraft,
+    extractedFields
+  );
   const activeAlarmFields =
     inputMode === "manual"
       ? manualFields
@@ -1429,7 +1433,11 @@ export default function Home() {
         </div>
 
         {inputMode === "extracted" ? (
-          <section className="confirmationCard inlineConfirmation" aria-labelledby="confirm-heading">
+          <section
+            className="confirmationCard inlineConfirmation"
+            aria-labelledby="confirm-heading"
+            data-has-fault-code={extractedAlarmHasFaultCode ? "true" : "false"}
+          >
             <div className="compactHeader">
               <div>
                 <p className="stepKicker">Extracted fields</p>
@@ -2219,6 +2227,16 @@ function getFeedbackSignature({
     commentProvided: comment.trim().length > 0,
     commentLength: comment.trim().length
   });
+}
+
+function hasExtractedAlarmFaultCode(
+  draft: Pick<AlarmExtractionDraftFields, "faultCode">,
+  fields: Pick<AlarmConfirmationFields, "alarmTextCode">
+) {
+  return (
+    Boolean(draft.faultCode.trim()) ||
+    /(?:fault\s*code|code|fault)\s*\d+/i.test(fields.alarmTextCode)
+  );
 }
 
 function formatDemoAlarmExport(fields: AlarmConfirmationFields) {
