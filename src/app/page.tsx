@@ -1588,6 +1588,13 @@ export default function Home() {
               <h3>Paste alarm export or raw message</h3>
             </div>
             <StatusBadge label={alarmExtractionWorkflowStatus} />
+            <div className="dataSafetyHint" role="note">
+              <Info aria-hidden="true" />
+              <span>
+                Use synthetic or non-confidential data only. Do not paste real customer, site,
+                asset, or confidential operational data.
+              </span>
+            </div>
             <textarea
               className="rawAlarmTextarea"
               rows={5}
@@ -1608,14 +1615,6 @@ export default function Home() {
               <p className="helperText compact">
                 Uploaded or pasted data must be confirmed before use.
               </p>
-            </div>
-            <div className="dataSafetyHint">
-              <Info aria-hidden="true" />
-              <span>Use synthetic or non-confidential data only.</span>
-              <details>
-                <summary>Why?</summary>
-                <p>Do not paste real customer, site, asset, or confidential operational data.</p>
-              </details>
             </div>
             {alarmExtractionStatus === "Error" ? (
               <p className="errorText">{alarmExtractionError}</p>
