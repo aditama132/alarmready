@@ -971,7 +971,10 @@ export default function Home() {
       pendo.track("alarm_fields_confirmed", {
         inputMode: "extracted",
         wasEdited,
-        hasFaultCode: Boolean(extractedFields.faultCode),
+        hasFaultCode: Boolean(
+          alarmExtractionDraft?.faultCode ||
+            /(?:fault\s*code|code|fault)\s*\d+/i.test(extractedFields.alarmTextCode ?? "")
+        ),
         severity: extractedFields.severity,
         manufacturer: alarmExtractionDraft.manufacturer,
         model: alarmExtractionDraft.model,
