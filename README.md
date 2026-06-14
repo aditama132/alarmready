@@ -1,18 +1,21 @@
 # AlarmReady
 
-AlarmReady is a public hackathon prototype for solar monitoring teams. It helps an engineer move from a raw alarm record to a Pre-WO Diagnostic Brief that can be reviewed by a human operator.
+AlarmReady is a public hackathon prototype for solar monitoring teams. It turns alarm, diagnostic, ticket-history, and operating context into a short human-validation checkpoint before work or ticket changes are propagated.
 
 ## Product Purpose
 
-The prototype organizes alarm details, optional site context, rule checks, and an operational note. It helps engineers start with the alarm, add context when available, and see how much context supports triage. Messy pasted or uploaded inputs can be structured with LLM extraction before the local rule engine runs. It is designed to support a narrow demo workflow:
+The prototype organizes alarm details, system context, rule checks, a Human Validation Summary, and an optional Decision Brief. It helps engineers start with the alarm, add context when available, and see how much context supports triage. Messy pasted or uploaded inputs can be structured with LLM extraction before the local rule engine runs. It is designed to support a narrow demo workflow:
 
 1. Enter or load a current alarm.
 2. Confirm extracted alarm fields or fill them manually.
-3. Add optional context when available.
+3. Add system context when available.
 4. Review deterministic local Triage Checks.
-5. Generate a Pre-WO Diagnostic Brief.
-6. Select a human decision.
-7. Generate and copy an operational note.
+5. Review the Human Validation Summary.
+6. Select the final human decision.
+7. Submit feedback.
+8. Optionally generate a Decision Brief for reporting, handover, or evidence-trail support.
+
+AlarmReady is now organized around a decision-first flow. The Human Validation Summary is the primary artifact. It appears after Triage Checks and before the Human Decision. After the Human Validation Summary, the user selects a final Human Decision and the workflow can stop there. The Human Decision stage uses directly editable decision options, so users can revise the decision by selecting another option; no separate Change or Clear buttons are needed. Feedback appears after a valid decision. The optional Decision Brief is only for documentation, reporting, handover, or evidence trail, and is not required for feedback or case completion. Start new case is the only global reset action.
 
 ## Local Setup
 
@@ -32,7 +35,7 @@ npm run build
 
 ## Environment Variables
 
-LLM extraction, Diagnostic Brief generation, and Operational Note generation use server-side OpenAI API routes. Add a local environment file:
+LLM extraction and optional Decision Brief generation use server-side OpenAI API routes. Add a local environment file:
 
 ```bash
 OPENAI_API_KEY=
@@ -58,13 +61,13 @@ Before sharing a public URL:
 - Redeploy after changing Vercel environment variables.
 - Keep `.env.local` out of git. The repository includes `.env.example` for safe configuration documentation.
 - Use synthetic or non-confidential data only. Do not paste real customer, site, asset, or confidential operational data into a public demo.
-- Confirm the full synthetic flow works: load the Context-Rich Example, extract and confirm each section, review Triage Checks, generate the Pre-WO Diagnostic Brief, choose a human decision, generate the Operational Note, and submit feedback.
+- Confirm the full synthetic flow works: load the Context-Rich Example, extract and confirm each section, review Triage Checks and the Human Validation Summary, choose a human decision, submit feedback, and optionally generate the Decision Brief.
 
 ## Demo Scenarios
 
 Use the visible scenario button in the Input Stage for the main demo path.
 
-- To test low-context behavior, enter only the current alarm manually and leave optional context empty. This tests missing-context discovery, low-context triage, and remote-verification readiness.
+- To test low-context behavior, enter only the current alarm manually and leave system context empty. This tests missing-context discovery, low-context triage, and remote-verification readiness.
 - **Context-Rich Example** loads a synthetic utility-scale Sungrow SG350HX string-inverter scenario using manual-grounded Fault code 39 — Low System Insulation Resistance. It treats recent MPPT-08 imbalance as related context only, then tests related-work risk, priority normalization, WO readiness, and human validation before any WO step.
 
 Both scenarios are synthetic and for prototype demonstration only. The Sungrow SG350HX scenario is not a real alarm export, does not represent a real site/customer/operational event, and AlarmReady does not diagnose the actual fault.
@@ -153,16 +156,16 @@ Do not manually add Novus instrumentation unless a Novus-generated pull request 
 
 ## Demo Limitations
 
-- Pre-WO Diagnostic Brief and Operational Note generation call the OpenAI Responses API from server routes when `OPENAI_API_KEY` is configured.
+- Optional Decision Brief generation reuses server-side OpenAI Responses API routes when `OPENAI_API_KEY` is configured.
 - Fault-code matching uses a small curated Sungrow SG320HX / SG350HX subset, not the full manual.
-- The Pre-WO Diagnostic Brief does not diagnose the actual fault.
+- The Decision Brief does not diagnose the actual fault.
 - The app does not create or dispatch work orders.
 - Sample data is synthetic and demo-oriented.
 - Persistence, authentication, audit logs, integrations, and alert ingestion are out of scope.
 
 ## Safety And Trust Statement
 
-AlarmReady is decision support only. It prepares a Pre-WO Diagnostic Brief for human validation, does not claim to diagnose faults, and does not dispatch work automatically. A qualified human must validate the evidence and approve any next step.
+AlarmReady is decision support only. It prepares a human-validation checkpoint and optional Decision Brief, does not claim to diagnose faults, and does not dispatch work automatically. A qualified human must validate the evidence and approve any next step.
 
 ## Hackathon Submission Checklist
 

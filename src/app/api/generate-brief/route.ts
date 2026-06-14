@@ -376,7 +376,7 @@ function applyFaultCode39Guardrail(
           : "Human reviewer must confirm whether remote evidence is sufficient and whether qualified follow-up is needed."
     },
     evidence_to_request: [
-      "iSolarCloud fault record showing Fault code 39 with timestamp, plus array insulation impedance / ISO resistance trend.",
+      "Monitoring-system fault record showing Fault code 39 with timestamp, plus array insulation impedance / ISO resistance trend.",
       "Resistance-to-ground test result for the relevant string and DC cable, performed under site safety procedure.",
       hasOpenWo1086 || hasClosedWo1042
         ? "Photos or test evidence for connectors, cables, moisture ingress, prior repaired string 08B, and close-out/update evidence on the existing WO."

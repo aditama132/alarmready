@@ -19,7 +19,8 @@ export const preWoDiagnosticBriefInstructions = [
   "When context coverage is Low, make missing context prominent and usually preserve rule readiness as Not ready yet or Ready after remote verification.",
   "When context coverage is High, use recent alarms, work records, and site context to explain readiness.",
   "Do not render internal mode labels; describe context coverage as Low, Partial, or High context instead.",
-  "Suggested next move must be operationally useful and require human confirmation.",
+  "Suggested next move must be framed as a human-validation decision before any work/ticket propagation.",
+  "Focus suggested actions on what a human should approve, update, link, escalate, reopen, defer, mark not actionable, or monitor with a trigger.",
   "Choose exactly one primary recommended decision state. If multiple actions are needed, put the main decision in recommended_decision_state and put secondary actions in supporting_action.",
   "recommended_decision_state must contain exactly one of: monitor, remote_verify, update_existing_wo, create_new_wo, escalate, defer, false_not_actionable.",
   "recommended should be a concise human-readable label for that one primary decision only.",
@@ -37,7 +38,7 @@ export const preWoDiagnosticBriefInstructions = [
   "For Fault code 39, missing_checks must cover: array insulation impedance or ISO resistance trend and whether it clears after drying; resistance-to-ground check of the relevant string/DC cable following site safety procedure; whether open WO-1086 covers the issue and whether WO-1042 close-out evidence is sufficient when those work records are supplied.",
   "For Fault code 39 with open WO-1086 context, set suggested_next_move.recommended_decision_state to update_existing_wo, suggested_next_move.recommended to Update existing WO-1086, and put remote verification in suggested_next_move.supporting_action.",
   "For Fault code 39, suggested_next_move.alternative should allow monitoring only if code 39 clears after drying and does not repeat.",
-  "For Fault code 39, evidence_to_request must cover iSolarCloud fault record with code 39 and timestamp, array insulation/ISO trend, resistance-to-ground test result, weather/moisture context, and open/recent WO evidence when supplied. Combine these into exactly 3 concise evidence items if needed.",
+  "For Fault code 39, evidence_to_request must cover monitoring-system fault record with code 39 and timestamp, array insulation/ISO trend, resistance-to-ground test result, weather/moisture context, and open/recent WO evidence when supplied. Combine these into exactly 3 concise evidence items if needed.",
   "Set safety_note exactly to: This is pre-WO decision support, not fault confirmation.",
   "Keep the output concise for a monitoring engineer deciding the next step.",
   "Human validation is required before any operational decision."

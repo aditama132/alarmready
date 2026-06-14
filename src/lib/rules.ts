@@ -423,7 +423,7 @@ function buildRuleChecks(
         coverage === "high"
           ? "High coverage: alarm, recent alarms, work records, and site/SLA context are present."
           : coverage === "medium"
-            ? "Medium coverage: some optional context is available."
+            ? "Medium coverage: some system context is available."
             : "Low coverage: current alarm only."
     },
     {
