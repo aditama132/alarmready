@@ -121,7 +121,7 @@ const decisionLabels: Record<TriageDecision, string> = {
   false_not_actionable: "False alarm / not actionable"
 };
 
-const decisionPlaceholder = "Select decision after reviewing brief";
+const decisionPlaceholder = "Select decision after reviewing summary";
 
 const initialDecisionState: DecisionState = {
   selectedDecision: "",
@@ -397,6 +397,36 @@ export default function Home() {
       decisionAlignment &&
       decisionState.selectedDecision &&
       !isDecisionReasonMissing
+  );
+  const hasActiveCaseData = Boolean(
+    demoDataLoaded ||
+      hasRawAlarmInput ||
+      alarmFileName ||
+      inputMode !== "none" ||
+      hasAnyAlarmConfirmationField(manualFields) ||
+      hasAnyAlarmConfirmationField(extractedFields) ||
+      isActiveSourceStatus(alarmExtractionWorkflowStatus) ||
+      hasRecentAlarmsRawInput ||
+      hasWorkRecordsRawInput ||
+      hasOperatingContextRawInput ||
+      recentAlarmsExtraction ||
+      workRecordsExtraction ||
+      operatingContextExtraction ||
+      isActiveSourceStatus(recentAlarmsExtractionWorkflowStatus) ||
+      isActiveSourceStatus(workRecordsExtractionWorkflowStatus) ||
+      isActiveSourceStatus(operatingContextExtractionWorkflowStatus) ||
+      ruleDecision ||
+      humanValidationSummary ||
+      generatedBrief ||
+      brief ||
+      workRecord ||
+      decisionState.selectedDecision ||
+      decisionState.validationNote.trim() ||
+      feedbackChoice ||
+      feedbackSelectedTags.length > 0 ||
+      feedbackComment.trim() ||
+      lastSavedFeedbackSignature ||
+      feedbackStatus !== "Idle"
   );
   const hasSavedFeedback = Boolean(lastSavedFeedbackSignature);
   const canSaveNeedsAdjustmentFeedback =
@@ -1658,6 +1688,12 @@ export default function Home() {
               <ListChecks aria-hidden="true" />
               Load Context-Rich Example
             </button>
+            {hasActiveCaseData ? (
+              <button type="button" className="ghostButton" onClick={startNewCase}>
+                <RefreshCcw aria-hidden="true" />
+                Start new case
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -2396,9 +2432,15 @@ export default function Home() {
           <div className="panelHeader compactHeader">
             <div>
               <p className="eyebrow">Feedback</p>
-              <h2 id="feedback-heading">Was this useful?</h2>
+              <h2 id="feedback-heading">
+                Was this validation summary useful for choosing the next human decision?
+              </h2>
             </div>
           </div>
+          <p className="helperText compact">
+            Rate the Human Validation Summary and decision flow. The optional Decision Brief is
+            only for reporting or handover.
+          </p>
 
           {!canSubmitFeedback ? (
             <div className="feedbackBlocked" aria-live="polite">
@@ -2599,26 +2641,6 @@ export default function Home() {
         </section>
       ) : null}
 
-      {humanValidationSummary ? (
-        <section className="panel caseActionsPanel" aria-labelledby="case-actions-heading">
-          <div className="panelHeader compactHeader">
-            <div>
-              <p className="eyebrow">Case control</p>
-              <h2 id="case-actions-heading">Start new case</h2>
-            </div>
-          </div>
-          <p className="helperText">
-            Clears all inputs, confirmations, triage output, human decision, optional Decision
-            Brief, and feedback state.
-          </p>
-          <div className="buttonRow decisionActions">
-            <button type="button" className="ghostButton" onClick={startNewCase}>
-              <RefreshCcw aria-hidden="true" />
-              Start new case
-            </button>
-          </div>
-        </section>
-      ) : null}
     </main>
   );
 }
@@ -2704,7 +2726,7 @@ function getWorkflowSteps(
   return [
     { label: "Input", state: hasTriageChecks ? "complete" : "current" },
     {
-      label: "Triage",
+      label: "Confirm context",
       state: !hasTriageChecks
         ? "locked"
         : hasHumanValidationSummary
@@ -2712,11 +2734,11 @@ function getWorkflowSteps(
           : "current"
     },
     {
-      label: "Human Validation",
+      label: "Review summary",
       state: !hasHumanValidationSummary ? "locked" : hasDecision ? "complete" : "current"
     },
     {
-      label: "Human Decision",
+      label: "Select decision",
       state: !hasHumanValidationSummary ? "locked" : hasDecision ? "complete" : "current"
     },
     {
@@ -2724,7 +2746,7 @@ function getWorkflowSteps(
       state: !canFeedback ? "locked" : hasFeedback ? "complete" : "current"
     },
     {
-      label: "Decision Brief",
+      label: "Optional brief",
       state: !canDecisionBrief ? "locked" : hasDecisionBrief ? "complete" : "current"
     }
   ];
@@ -2928,6 +2950,14 @@ function isSourceStatus(value: string): value is SourceStatus {
     "edited_needs_confirmation",
     "cleared"
   ].includes(value);
+}
+
+function isActiveSourceStatus(status: SourceStatus) {
+  return status !== "not_provided" && status !== "cleared";
+}
+
+function hasAnyAlarmConfirmationField(fields: AlarmConfirmationFields) {
+  return Object.values(fields).some((value) => value.trim().length > 0);
 }
 
 function getContextSourceSummary(statuses: Record<OptionalContextSource, OptionalContextStatus>) {

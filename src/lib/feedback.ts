@@ -7,12 +7,13 @@ import type {
 export const feedbackStorageKey = "alarmready_feedback_v1";
 
 export const feedbackTags = [
-  "Too generic",
-  "Missing context",
-  "Unsafe / too confident",
-  "Wrong priority",
-  "Wrong interpretation",
-  "Wrong note type",
+  "Suggested decision was wrong",
+  "Missing important context",
+  "Evidence request was unclear",
+  "Risk warning was unclear",
+  "Too much information",
+  "Too little information",
+  "Decision options were unclear",
   "Other"
 ] as const;
 
