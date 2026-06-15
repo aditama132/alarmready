@@ -442,7 +442,6 @@ export default function Home() {
     Boolean(triageChecks),
     Boolean(humanValidationSummary),
     hasValidCompletedDecision,
-    Boolean(workRecord),
     hasSavedFeedback
   );
   const showFeedbackLog = process.env.NODE_ENV === "development";
@@ -2503,6 +2502,83 @@ export default function Home() {
       </section>
 
       {hasSelectedDecision ? (
+        <section className="panel decisionBriefPanel" aria-labelledby="decision-brief-heading">
+          <div className="panelHeader">
+            <div>
+              <p className="eyebrow">Optional artifact</p>
+              <h2 id="decision-brief-heading">Optional Decision Brief</h2>
+            </div>
+            {workRecord ? <CheckCircle2 className="readyIcon" aria-hidden="true" /> : null}
+          </div>
+
+          <p className="helperText">
+            Generate this only if you need a report, handover note, or evidence trail after
+            selecting the human decision.
+          </p>
+
+          <div className="buttonRow decisionActions">
+            <button
+              type="button"
+              className="secondaryButton"
+              onClick={handleGenerateDecisionBrief}
+              disabled={!canGenerateDecisionBrief || briefStatus === "Loading" || noteStatus === "Loading"}
+            >
+              <ClipboardCheck aria-hidden="true" />
+              {briefStatus === "Loading" || noteStatus === "Loading"
+                ? "Generating decision brief..."
+                : "Generate optional decision brief"}
+            </button>
+            <button
+              type="button"
+              className="secondaryButton"
+              onClick={copyNote}
+              disabled={!workRecord?.operationalNote}
+            >
+              <Clipboard aria-hidden="true" />
+              {copyStatus === "Idle" ? "Copy handover note" : copyStatus}
+            </button>
+          </div>
+
+          {isDecisionReasonMissing ? (
+            <p className="helperText compact">
+              Reason required before generating the Decision Brief because this is a high-risk
+              mismatch.
+            </p>
+          ) : null}
+          {briefStatus === "Error" ? <p className="errorText">{briefError}</p> : null}
+          {noteStatus === "Error" ? <p className="errorText">{noteError}</p> : null}
+
+          {workRecord && generatedBrief && humanValidationSummary && ruleDecision ? (
+            <>
+              {briefStatus === "Loading" || noteStatus === "Loading" ? (
+                <p className="helperText compact">
+                  Generating updated optional Decision Brief... Previous version remains visible.
+                </p>
+              ) : null}
+              <DecisionBriefContent
+                alarm={alarm}
+                decisionState={decisionState}
+                generatedBrief={generatedBrief}
+                humanValidationSummary={humanValidationSummary}
+                ruleDecision={ruleDecision}
+                workRecord={workRecord}
+              />
+            </>
+          ) : briefStatus === "Loading" || noteStatus === "Loading" ? (
+            <div className="emptyState compact">
+              <FileText aria-hidden="true" />
+              <p>Generating optional Decision Brief...</p>
+            </div>
+          ) : briefStatus === "Error" || noteStatus === "Error" ? null : (
+            <div className="emptyState compact">
+              <FileText aria-hidden="true" />
+              <p>No optional Decision Brief generated yet.</p>
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {hasSelectedDecision ? (
         <section className="panel feedbackPanel" aria-labelledby="feedback-heading">
           <div className="panelHeader compactHeader">
             <div>
@@ -2649,83 +2725,6 @@ export default function Home() {
         </section>
       ) : null}
 
-      {hasSelectedDecision ? (
-        <section className="panel decisionBriefPanel" aria-labelledby="decision-brief-heading">
-          <div className="panelHeader">
-            <div>
-              <p className="eyebrow">Optional artifact</p>
-              <h2 id="decision-brief-heading">Decision Brief</h2>
-            </div>
-            {workRecord ? <CheckCircle2 className="readyIcon" aria-hidden="true" /> : null}
-          </div>
-
-          <p className="helperText">
-            Generate this only if you need a report, handover note, or evidence trail after
-            selecting the human decision.
-          </p>
-
-          <div className="buttonRow decisionActions">
-            <button
-              type="button"
-              className="secondaryButton"
-              onClick={handleGenerateDecisionBrief}
-              disabled={!canGenerateDecisionBrief || briefStatus === "Loading" || noteStatus === "Loading"}
-            >
-              <ClipboardCheck aria-hidden="true" />
-              {briefStatus === "Loading" || noteStatus === "Loading"
-                ? "Generating decision brief..."
-                : "Generate optional decision brief"}
-            </button>
-            <button
-              type="button"
-              className="secondaryButton"
-              onClick={copyNote}
-              disabled={!workRecord?.operationalNote}
-            >
-              <Clipboard aria-hidden="true" />
-              {copyStatus === "Idle" ? "Copy handover note" : copyStatus}
-            </button>
-          </div>
-
-          {isDecisionReasonMissing ? (
-            <p className="helperText compact">
-              Reason required before generating the Decision Brief because this is a high-risk
-              mismatch.
-            </p>
-          ) : null}
-          {briefStatus === "Error" ? <p className="errorText">{briefError}</p> : null}
-          {noteStatus === "Error" ? <p className="errorText">{noteError}</p> : null}
-
-          {workRecord && generatedBrief && humanValidationSummary && ruleDecision ? (
-            <>
-              {briefStatus === "Loading" || noteStatus === "Loading" ? (
-                <p className="helperText compact">
-                  Generating updated optional Decision Brief... Previous version remains visible.
-                </p>
-              ) : null}
-              <DecisionBriefContent
-                alarm={alarm}
-                decisionState={decisionState}
-                generatedBrief={generatedBrief}
-                humanValidationSummary={humanValidationSummary}
-                ruleDecision={ruleDecision}
-                workRecord={workRecord}
-              />
-            </>
-          ) : briefStatus === "Loading" || noteStatus === "Loading" ? (
-            <div className="emptyState compact">
-              <FileText aria-hidden="true" />
-              <p>Generating optional Decision Brief...</p>
-            </div>
-          ) : briefStatus === "Error" || noteStatus === "Error" ? null : (
-            <div className="emptyState compact">
-              <FileText aria-hidden="true" />
-              <p>No optional Decision Brief generated yet.</p>
-            </div>
-          )}
-        </section>
-      ) : null}
-
     </main>
   );
 }
@@ -2803,7 +2802,6 @@ function getWorkflowSteps(
   hasTriageChecks: boolean,
   hasHumanValidationSummary: boolean,
   hasValidCompletedDecision: boolean,
-  hasDecisionBrief: boolean,
   hasFeedback: boolean
 ): WorkflowStep[] {
   return [
@@ -2827,10 +2825,6 @@ function getWorkflowSteps(
     {
       label: "Feedback",
       state: !hasValidCompletedDecision ? "locked" : hasFeedback ? "complete" : "current"
-    },
-    {
-      label: "Optional brief",
-      state: !hasValidCompletedDecision ? "locked" : hasDecisionBrief ? "complete" : "current"
     }
   ];
 }
