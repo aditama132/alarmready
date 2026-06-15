@@ -1280,10 +1280,6 @@ export default function Home() {
 
     const nextBrief = mapGeneratedBriefToDiagnosticBrief(data, ruleDecision);
 
-    setGeneratedBrief(data);
-    setBrief(nextBrief);
-    setBriefStatus("Idle");
-
     if (typeof pendo !== "undefined") {
       pendo.track("diagnostic_brief_generated", {
         mode: ruleDecision.mode,
@@ -1313,12 +1309,10 @@ export default function Home() {
       return;
     }
 
-    setBrief(null);
-    setGeneratedBrief(null);
+    setBriefStatus("Loading");
+    setBriefError("");
     setNoteStatus("Loading");
     setNoteError("");
-    setWorkRecord(null);
-    setCopyStatus("Idle");
 
     let generatedDiagnosticBrief: GeneratedDiagnosticBrief;
     let diagnosticBrief: DiagnosticBrief;
@@ -1329,8 +1323,13 @@ export default function Home() {
       diagnosticBrief = result.brief;
     } catch (error) {
       setBriefStatus("Error");
-      setBriefError(error instanceof Error ? error.message : "Failed to generate the decision brief.");
+      setBriefError(
+        error instanceof Error
+          ? `Could not generate the optional Decision Brief. Previous brief is still shown if available. ${error.message}`
+          : "Could not generate the optional Decision Brief. Previous brief is still shown if available."
+      );
       setNoteStatus("Idle");
+      setNoteError("");
       return;
     }
 
@@ -1372,12 +1371,18 @@ export default function Home() {
         data.operationalNote
       );
 
+      setGeneratedBrief(generatedDiagnosticBrief);
+      setBrief(diagnosticBrief);
       setWorkRecord(nextRecord);
       setDecisionState((current) => ({
         ...current,
         operationalNote: nextRecord.operationalNote
       }));
+      setBriefStatus("Idle");
       setNoteStatus("Idle");
+      setBriefError("");
+      setNoteError("");
+      setCopyStatus("Idle");
 
       if (typeof pendo !== "undefined") {
         pendo.track("operational_note_generated", {
@@ -1394,8 +1399,13 @@ export default function Home() {
         });
       }
     } catch (error) {
+      setBriefStatus("Idle");
       setNoteStatus("Error");
-      setNoteError(error instanceof Error ? error.message : "Failed to generate the Decision Brief.");
+      setNoteError(
+        error instanceof Error
+          ? `Could not finish the optional Decision Brief. Previous brief is still shown if available. ${error.message}`
+          : "Could not finish the optional Decision Brief. Previous brief is still shown if available."
+      );
     }
   };
 
@@ -1596,6 +1606,14 @@ export default function Home() {
   };
 
   const startNewCase = () => {
+    const confirmed = window.confirm(
+      "Start a new case? This will clear all inputs, extracted context, confirmations, triage results, decision, feedback, and optional brief."
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
     if (typeof pendo !== "undefined") {
       pendo.track("workflow_reset", {
         hadAlarmInput: Boolean(rawAlarmInput.trim()),
@@ -1620,6 +1638,16 @@ export default function Home() {
     resetExtractionState();
     resetDownstream();
     setDemoDataLoaded(false);
+  };
+
+  const focusHumanDecisionReason = () => {
+    const element = document.getElementById("human-decision-reason");
+
+    element?.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
+      element.focus();
+    }
   };
 
   const updateSelectedDecision = (selectedDecision: TriageDecision | "") => {
@@ -2405,6 +2433,7 @@ export default function Home() {
           <label>
             <span>Human decision reason</span>
             <textarea
+              id="human-decision-reason"
               rows={4}
               disabled={!humanValidationSummary}
               value={decisionState.validationNote}
@@ -2456,6 +2485,9 @@ export default function Home() {
                 This high-risk mismatch needs a short human rationale before feedback or an
                 optional Decision Brief can continue.
               </p>
+              <button type="button" className="secondaryButton" onClick={focusHumanDecisionReason}>
+                Add rationale
+              </button>
             </div>
           ) : (
             <>
@@ -2626,20 +2658,27 @@ export default function Home() {
           {noteStatus === "Error" ? <p className="errorText">{noteError}</p> : null}
 
           {workRecord && generatedBrief && humanValidationSummary && ruleDecision ? (
-            <DecisionBriefContent
-              alarm={alarm}
-              decisionState={decisionState}
-              generatedBrief={generatedBrief}
-              humanValidationSummary={humanValidationSummary}
-              ruleDecision={ruleDecision}
-              workRecord={workRecord}
-            />
+            <>
+              {briefStatus === "Loading" || noteStatus === "Loading" ? (
+                <p className="helperText compact">
+                  Generating updated optional Decision Brief... Previous version remains visible.
+                </p>
+              ) : null}
+              <DecisionBriefContent
+                alarm={alarm}
+                decisionState={decisionState}
+                generatedBrief={generatedBrief}
+                humanValidationSummary={humanValidationSummary}
+                ruleDecision={ruleDecision}
+                workRecord={workRecord}
+              />
+            </>
           ) : briefStatus === "Loading" || noteStatus === "Loading" ? (
             <div className="emptyState compact">
               <FileText aria-hidden="true" />
               <p>Generating optional Decision Brief...</p>
             </div>
-          ) : (
+          ) : briefStatus === "Error" || noteStatus === "Error" ? null : (
             <div className="emptyState compact">
               <FileText aria-hidden="true" />
               <p>No optional Decision Brief generated yet.</p>
