@@ -246,6 +246,7 @@ button svg {
 .buttonRow {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   gap: 10px;
   justify-content: flex-end;
 }
@@ -292,12 +293,55 @@ button svg {
   color: var(--ink);
 }
 
+.destructiveButton {
+  border-color: #d7a25a;
+  background: #fff4dc;
+  color: #6f3707;
+}
+
 .primaryButton:hover,
 .secondaryButton:hover,
 .ghostButton:hover,
+.destructiveButton:hover,
 .feedbackButton:hover,
 .feedbackTagButton:hover {
   transform: translateY(-1px);
+}
+
+.startNewCaseConfirm {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.startNewCaseActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.startNewCaseHint {
+  color: #60400b;
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.inlineTextButton {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #075d60;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 900;
+  margin-left: 8px;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 button:disabled {
@@ -1471,6 +1515,25 @@ pre {
   .buttonRow,
   .decisionActions {
     justify-content: stretch;
+  }
+
+  .startNewCaseConfirm {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .startNewCaseActions {
+    align-items: stretch;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .startNewCaseActions .inlineTextButton {
+    align-self: center;
+  }
+
+  .startNewCaseHint {
+    text-align: left;
   }
 
   .primaryButton,

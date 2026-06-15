@@ -209,6 +209,7 @@ export default function Home() {
     useState<FeedbackStorageMode | "unknown">("unknown");
   const [supabaseFeedbackSessionCount, setSupabaseFeedbackSessionCount] = useState(0);
   const [demoDataLoaded, setDemoDataLoaded] = useState(false);
+  const [confirmingStartNewCase, setConfirmingStartNewCase] = useState(false);
   const [isOptionalContextExpanded, setIsOptionalContextExpanded] = useState(false);
   const [isRecentAlarmsExpanded, setIsRecentAlarmsExpanded] = useState(false);
   const [isWorkRecordsExpanded, setIsWorkRecordsExpanded] = useState(false);
@@ -455,6 +456,18 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!confirmingStartNewCase) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setConfirmingStartNewCase(false);
+    }, hasActiveCaseData ? 8000 : 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [confirmingStartNewCase, hasActiveCaseData]);
+
+  useEffect(() => {
     let isMounted = true;
 
     fetch("/api/feedback")
@@ -535,6 +548,7 @@ export default function Home() {
     setNoteError("");
     setDecisionState(initialDecisionState);
     setShowPreservedValidationNoteHelper(false);
+    setConfirmingStartNewCase(false);
     setCopyStatus("Idle");
     resetFeedbackState();
   };
@@ -1606,13 +1620,12 @@ export default function Home() {
   };
 
   const startNewCase = () => {
-    const confirmed = window.confirm(
-      "Start a new case? This will clear all inputs, extracted context, confirmations, triage results, decision, feedback, and optional brief."
-    );
-
-    if (!confirmed) {
+    if (!confirmingStartNewCase) {
+      setConfirmingStartNewCase(true);
       return;
     }
+
+    setConfirmingStartNewCase(false);
 
     if (typeof pendo !== "undefined") {
       pendo.track("workflow_reset", {
@@ -1638,6 +1651,10 @@ export default function Home() {
     resetExtractionState();
     resetDownstream();
     setDemoDataLoaded(false);
+  };
+
+  const cancelStartNewCase = () => {
+    setConfirmingStartNewCase(false);
   };
 
   const focusHumanDecisionReason = () => {
@@ -1719,10 +1736,32 @@ export default function Home() {
               Load Context-Rich Example
             </button>
             {hasActiveCaseData ? (
-              <button type="button" className="ghostButton" onClick={startNewCase}>
-                <RefreshCcw aria-hidden="true" />
-                Start new case
-              </button>
+              <div className="startNewCaseConfirm">
+                <div className="startNewCaseActions">
+                  <button
+                    type="button"
+                    className={confirmingStartNewCase ? "secondaryButton destructiveButton" : "ghostButton"}
+                    onClick={startNewCase}
+                  >
+                    <RefreshCcw aria-hidden="true" />
+                    {confirmingStartNewCase ? "Confirm start new case" : "Start new case"}
+                  </button>
+                  {confirmingStartNewCase ? (
+                    <button type="button" className="inlineTextButton" onClick={cancelStartNewCase}>
+                      Cancel
+                    </button>
+                  ) : null}
+                </div>
+                {confirmingStartNewCase ? (
+                  <p
+                    className="startNewCaseHint"
+                    role="status"
+                    title="Clears inputs, extracted context, confirmations, triage results, decision, feedback, and optional brief."
+                  >
+                    Clears current case data.
+                  </p>
+                ) : null}
+              </div>
             ) : null}
           </div>
         </div>
