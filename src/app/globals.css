@@ -246,6 +246,7 @@ button svg {
 .buttonRow {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   gap: 10px;
   justify-content: flex-end;
 }
@@ -292,12 +293,96 @@ button svg {
   color: var(--ink);
 }
 
+.destructiveButton {
+  border-color: #d7a25a;
+  background: #fff4dc;
+  color: #6f3707;
+}
+
 .primaryButton:hover,
 .secondaryButton:hover,
 .ghostButton:hover,
+.destructiveButton:hover,
 .feedbackButton:hover,
 .feedbackTagButton:hover {
   transform: translateY(-1px);
+}
+
+.startNewCaseConfirm {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.startNewCaseActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.startNewCaseHint {
+  color: #60400b;
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.inlineTextButton {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #075d60;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 900;
+  margin-left: 8px;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.sourceMapping {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.sourceMappingToggle {
+  margin-left: 0;
+}
+
+.sourceMappingList {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+
+.sourceMappingRow {
+  display: grid;
+  grid-template-columns: minmax(110px, 170px) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.sourceMappingRow dt {
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.sourceMappingRow dd {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.sourceMappingFallback {
+  color: #7b7569;
+  font-style: italic;
 }
 
 button:disabled {
@@ -766,6 +851,61 @@ label em {
   gap: 12px;
 }
 
+.humanValidationPanel {
+  border-color: #cdded9;
+  background: #f8fcfa;
+}
+
+.validationSummaryGrid {
+  display: grid;
+  gap: 10px;
+}
+
+.validationSummaryItem {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #dce4dc;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.validationSummaryItem span {
+  color: var(--teal-dark);
+  font-size: 0.75rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.validationSummaryItem strong {
+  color: var(--ink);
+  font-size: 1rem;
+  line-height: 1.35;
+}
+
+.validationSummaryItem p,
+.validationSummaryItem ul {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.validationSummaryItem ul {
+  display: grid;
+  gap: 5px;
+  padding-left: 18px;
+}
+
+.validationSummaryItem.primary {
+  border-left: 4px solid var(--teal);
+}
+
+.validationSummaryItem.risk {
+  border-left: 4px solid var(--solar);
+}
+
 .actionBand {
   display: flex;
   justify-content: space-between;
@@ -995,7 +1135,9 @@ label em {
 }
 
 .briefPanel {
-  min-height: 360px;
+  min-height: 240px;
+  background: rgba(255, 253, 248, 0.72);
+  box-shadow: none;
 }
 
 .readyIcon {
@@ -1014,6 +1156,25 @@ label em {
   border-radius: 8px;
   background: #ffffff;
   padding: 18px;
+}
+
+.fullBriefDetails {
+  border: 1px solid #e3dfd3;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px 14px;
+}
+
+.fullBriefDetails summary {
+  cursor: pointer;
+  color: var(--teal-dark);
+  font-weight: 900;
+}
+
+.fullBriefDetails .numberedBrief {
+  margin-top: 14px;
+  border: 0;
+  padding: 6px 0 0;
 }
 
 .briefSection {
@@ -1104,6 +1265,10 @@ label em {
   text-align: center;
 }
 
+.emptyState.compact {
+  min-height: 150px;
+}
+
 .emptyState svg {
   width: 40px;
   height: 40px;
@@ -1112,6 +1277,27 @@ label em {
 
 .decisionPanel {
   margin-top: 18px;
+}
+
+.decisionBriefPanel {
+  margin-top: 18px;
+  background: rgba(255, 253, 248, 0.86);
+}
+
+.decisionBriefContent {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+  border: 1px solid #e3dfd3;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 18px;
+}
+
+.decisionBriefNote {
+  border: 1px solid #d9e8e3;
+  border-radius: 8px;
+  background: #f8fffc;
 }
 
 .decisionPanel.isDeemphasized {
@@ -1166,6 +1352,38 @@ label em {
 }
 
 .decisionAlignmentWarning p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.decisionCapturedState {
+  display: grid;
+  gap: 5px;
+  margin-top: 14px;
+  border: 1px solid #cbded9;
+  border-radius: 8px;
+  background: #f8fffc;
+  padding: 12px 14px;
+}
+
+.decisionCapturedState.mismatch {
+  border-color: #e0c885;
+  background: #fff9e8;
+}
+
+.decisionCapturedState.highRisk {
+  border-color: #dfb1a5;
+  background: #fff3ee;
+}
+
+.decisionCapturedState strong {
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
+.decisionCapturedState p {
   margin: 0;
   color: var(--muted);
   font-size: 0.9rem;
@@ -1231,6 +1449,27 @@ pre {
   display: grid;
   gap: 14px;
   margin-top: 14px;
+}
+
+.feedbackBlocked {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #dfb1a5;
+  border-radius: 8px;
+  background: #fff3ee;
+  padding: 12px 14px;
+}
+
+.feedbackBlocked strong {
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
+.feedbackBlocked p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
 }
 
 .feedbackTagGrid {
@@ -1317,6 +1556,25 @@ pre {
   .buttonRow,
   .decisionActions {
     justify-content: stretch;
+  }
+
+  .startNewCaseConfirm {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .startNewCaseActions {
+    align-items: stretch;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .startNewCaseActions .inlineTextButton {
+    align-self: center;
+  }
+
+  .startNewCaseHint {
+    text-align: left;
   }
 
   .primaryButton,

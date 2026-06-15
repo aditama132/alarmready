@@ -83,7 +83,7 @@ export function generateDiagnosticBrief(
         context.productionImpact && `Production impact: ${context.productionImpact}`,
         context.operatorNotes && `Operator notes: ${context.operatorNotes}`
       ].filter(isString)
-    : ["No optional context supplied; treat this as a raw-alarm brief."];
+    : ["No system context supplied; treat this as a raw-alarm brief."];
 
   const dataGaps = [
     !hasValue(alarm.currentValue) && "Missing current measured value.",

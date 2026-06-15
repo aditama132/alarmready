@@ -20,7 +20,6 @@ import { generateOperationalNote } from "@/lib/triage";
 import { contextAwareExample } from "@/lib/sampleData";
 import { runRuleEngine } from "@/lib/rules";
 import type { RuleFinding, TriageDecision as RuleEngineDecision } from "@/lib/rules";
-import { evaluateDecisionAlignment } from "@/lib/decisionAlignment";
 import type { DecisionAlignment } from "@/lib/decisionAlignment";
 import {
   clearFeedbackRecords,
@@ -46,6 +45,9 @@ import {
 import type {
   AlarmExtractionDraftFields,
   AlarmExtractionResult,
+  ExtractedRecentAlarm,
+  ExtractedWorkRecord,
+  ExtractionConfidence,
   OperatingContextExtractionResult,
   RecentAlarmExtractionResult,
   WorkRecordExtractionResult
@@ -66,6 +68,7 @@ import type {
   OperatingContextChip
 } from "@/lib/input-normalizer";
 import type {
+  AlarmRecord,
   DecisionState,
   DiagnosticBrief,
   GeneratedDiagnosticBrief,
@@ -87,6 +90,20 @@ type SourceStatus =
 type ExtractionWorkflowStatus = SourceStatus;
 type OptionalContextStatus = SourceStatus;
 type OptionalContextSource = "recentAlarms" | "workRecords" | "operatingContext";
+type SectionConfidence = ExtractionConfidence;
+type AlarmSourceMapping = {
+  label: string;
+  sourceText: string;
+};
+
+type HumanValidationSummary = {
+  primaryDecisionState: TriageDecision;
+  recommendedHumanDecision: string;
+  whyValidationNeeded: string;
+  actionToApproveOrUpdate: string;
+  evidenceNeeded: string[];
+  riskIfSkipped: string;
+};
 
 const decisionOptions: TriageDecision[] = [
   "monitor",
@@ -108,7 +125,7 @@ const decisionLabels: Record<TriageDecision, string> = {
   false_not_actionable: "False alarm / not actionable"
 };
 
-const decisionPlaceholder = "Select decision after reviewing brief";
+const decisionPlaceholder = "Select decision after reviewing summary";
 
 const initialDecisionState: DecisionState = {
   selectedDecision: "",
@@ -181,6 +198,8 @@ export default function Home() {
   const [noteStatus, setNoteStatus] = useState<"Idle" | "Loading" | "Error">("Idle");
   const [noteError, setNoteError] = useState("");
   const [decisionState, setDecisionState] = useState<DecisionState>(initialDecisionState);
+  const [showPreservedValidationNoteHelper, setShowPreservedValidationNoteHelper] =
+    useState(false);
   const [copyStatus, setCopyStatus] = useState<"Idle" | "Copied" | "Copy failed">("Idle");
   const [feedbackChoice, setFeedbackChoice] = useState<FeedbackChoice>(null);
   const [feedbackSelectedTags, setFeedbackSelectedTags] = useState<FeedbackTag[]>([]);
@@ -194,16 +213,23 @@ export default function Home() {
     useState<FeedbackStorageMode | "unknown">("unknown");
   const [supabaseFeedbackSessionCount, setSupabaseFeedbackSessionCount] = useState(0);
   const [demoDataLoaded, setDemoDataLoaded] = useState(false);
+  const [confirmingStartNewCase, setConfirmingStartNewCase] = useState(false);
   const [isOptionalContextExpanded, setIsOptionalContextExpanded] = useState(false);
   const [isRecentAlarmsExpanded, setIsRecentAlarmsExpanded] = useState(false);
   const [isWorkRecordsExpanded, setIsWorkRecordsExpanded] = useState(false);
   const [isOperatingContextExpanded, setIsOperatingContextExpanded] = useState(false);
+  const [isAlarmSourceMappingExpanded, setIsAlarmSourceMappingExpanded] = useState(false);
 
   const manualValidation = validateAlarmFields(manualFields);
   const extractedValidation = validateAlarmFields(extractedFields);
   const extractedAlarmHasFaultCode = hasExtractedAlarmFaultCode(
     alarmExtractionDraft,
     extractedFields
+  );
+  const alarmSourceMappings = getAlarmSourceMappings(
+    alarmExtractionDraft,
+    alarmExtraction?.evidence ?? [],
+    rawAlarmInput
   );
   const activeAlarmFields =
     inputMode === "manual"
@@ -272,8 +298,14 @@ export default function Home() {
     ]
   );
   const hasSelectedDecision = decisionState.selectedDecision !== "";
-  const canGenerateBrief = Boolean(ruleDecision && triageReady);
   const triageChecks = ruleDecision ? getTriageChecks(ruleDecision, triageContextInput) : null;
+  const humanValidationSummary = ruleDecision
+    ? getHumanValidationSummary({
+        alarm,
+        generatedBrief,
+        ruleDecision
+      })
+    : null;
   const contextSourceSummary = getContextSourceSummary({
     recentAlarms: recentAlarmsExtractionWorkflowStatus,
     workRecords: workRecordsExtractionWorkflowStatus,
@@ -355,29 +387,62 @@ export default function Home() {
     hasLastExtraction: Boolean(lastExtractedOperatingContextSignature)
   });
   const decisionAlignment =
-    generatedBrief && ruleDecision && decisionState.selectedDecision
-      ? evaluateDecisionAlignment({
-          aiSuggestedNextMove: generatedBrief.suggested_next_move.recommended,
+    humanValidationSummary && ruleDecision && decisionState.selectedDecision
+      ? evaluateHumanValidationDecisionAlignment({
+          suggestedDecision: humanValidationSummary.primaryDecisionState,
           selectedHumanDecision: decisionState.selectedDecision,
-          triageResult: ruleDecision,
-          generatedBrief
+          triageResult: ruleDecision
         })
       : null;
   const isDecisionReasonRequired = Boolean(decisionAlignment?.requiresReason);
   const isDecisionReasonMissing =
     isDecisionReasonRequired && decisionState.validationNote.trim().length === 0;
-  const canGenerateNote = Boolean(
-    brief &&
-      generatedBrief &&
-      ruleDecision &&
+  const hasValidCompletedDecision = Boolean(
+    ruleDecision &&
+      humanValidationSummary &&
       decisionAlignment &&
-      hasSelectedDecision &&
+      decisionState.selectedDecision &&
       !isDecisionReasonMissing
+  );
+  const canGenerateDecisionBrief = hasValidCompletedDecision;
+  const canSubmitFeedback = hasValidCompletedDecision;
+  const hasMeaningfulInput = Boolean(
+    demoDataLoaded ||
+      hasRawAlarmInput ||
+      alarmFileName ||
+      inputMode !== "none" ||
+      hasAnyAlarmConfirmationField(manualFields) ||
+      hasAnyAlarmConfirmationField(extractedFields) ||
+      isActiveSourceStatus(alarmExtractionWorkflowStatus) ||
+      hasRecentAlarmsRawInput ||
+      hasWorkRecordsRawInput ||
+      hasOperatingContextRawInput ||
+      recentAlarmsExtraction ||
+      workRecordsExtraction ||
+      operatingContextExtraction ||
+      isActiveSourceStatus(recentAlarmsExtractionWorkflowStatus) ||
+      isActiveSourceStatus(workRecordsExtractionWorkflowStatus) ||
+      isActiveSourceStatus(operatingContextExtractionWorkflowStatus)
+  );
+  const hasActiveCaseData = Boolean(
+    hasMeaningfulInput ||
+      ruleDecision ||
+      humanValidationSummary ||
+      generatedBrief ||
+      brief ||
+      workRecord ||
+      decisionState.selectedDecision ||
+      decisionState.validationNote.trim() ||
+      feedbackChoice ||
+      feedbackSelectedTags.length > 0 ||
+      feedbackComment.trim() ||
+      lastSavedFeedbackSignature ||
+      feedbackStatus !== "Idle"
   );
   const hasSavedFeedback = Boolean(lastSavedFeedbackSignature);
   const canSaveNeedsAdjustmentFeedback =
-    feedbackSelectedTags.length > 0 || feedbackComment.trim().length > 0;
-  const needsAdjustmentSignature = workRecord
+    canSubmitFeedback && (feedbackSelectedTags.length > 0 || feedbackComment.trim().length > 0);
+  const needsAdjustmentSignature = hasSelectedDecision
     ? getFeedbackSignature({
         useful: false,
         tags: feedbackSelectedTags,
@@ -387,10 +452,12 @@ export default function Home() {
   const isNeedsAdjustmentDuplicate =
     Boolean(needsAdjustmentSignature) && needsAdjustmentSignature === lastSavedFeedbackSignature;
   const workflowSteps = getWorkflowSteps(
-    Boolean(brief),
-    hasSelectedDecision,
-    Boolean(workRecord),
-    hasSavedFeedback
+    hasMeaningfulInput,
+    Boolean(ruleDecision),
+    Boolean(humanValidationSummary),
+    hasValidCompletedDecision,
+    hasSavedFeedback,
+    Boolean(workRecord && generatedBrief)
   );
   const showFeedbackLog = process.env.NODE_ENV === "development";
 
@@ -401,6 +468,18 @@ export default function Home() {
 
     return () => window.cancelAnimationFrame(frame);
   }, []);
+
+  useEffect(() => {
+    if (!confirmingStartNewCase) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setConfirmingStartNewCase(false);
+    }, hasActiveCaseData ? 8000 : 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [confirmingStartNewCase, hasActiveCaseData]);
 
   useEffect(() => {
     let isMounted = true;
@@ -441,6 +520,7 @@ export default function Home() {
     setAlarmExtractionWorkflowStatus("not_provided");
     setAlarmExtractionError("");
     setAlarmExtractionDraft(emptyAlarmExtractionDraftFields);
+    setIsAlarmSourceMappingExpanded(false);
     setAlarmRawDirty(false);
     setLastExtractedAlarmSignature("");
     setRecentAlarmsExtraction(null);
@@ -482,6 +562,8 @@ export default function Home() {
     setNoteStatus("Idle");
     setNoteError("");
     setDecisionState(initialDecisionState);
+    setShowPreservedValidationNoteHelper(false);
+    setConfirmingStartNewCase(false);
     setCopyStatus("Idle");
     resetFeedbackState();
   };
@@ -497,6 +579,7 @@ export default function Home() {
     );
     setAlarmExtractionError("");
     setAlarmExtractionDraft(emptyAlarmExtractionDraftFields);
+    setIsAlarmSourceMappingExpanded(false);
     setExtractedConfirmed(false);
     setManualFields(nextFields);
     setDemoDataLoaded(false);
@@ -585,6 +668,7 @@ export default function Home() {
     setAlarmExtractionWorkflowStatus(value.trim() ? "raw_provided" : "not_provided");
     setAlarmExtractionError("");
     setAlarmExtractionDraft(emptyAlarmExtractionDraftFields);
+    setIsAlarmSourceMappingExpanded(false);
     setExtractedFields(emptyAlarmFields);
     setExtractedConfirmed(false);
     setAlarmRawDirty(Boolean(value.trim()));
@@ -613,6 +697,7 @@ export default function Home() {
       setAlarmExtractionWorkflowStatus("not_provided");
       setAlarmExtractionError("");
       setAlarmExtractionDraft(emptyAlarmExtractionDraftFields);
+      setIsAlarmSourceMappingExpanded(false);
       setAlarmRawDirty(false);
       resetDownstream();
       return;
@@ -622,6 +707,7 @@ export default function Home() {
     setAlarmExtractionWorkflowStatus("extracting");
     setAlarmExtractionError("");
     setAlarmExtraction(null);
+    setIsAlarmSourceMappingExpanded(false);
 
     const extractionStart = getTelemetryNow();
 
@@ -652,6 +738,7 @@ export default function Home() {
       setExtractedConfirmed(false);
       setAlarmExtractionStatus("Idle");
       setAlarmExtractionWorkflowStatus("extracted_needs_confirmation");
+      setIsAlarmSourceMappingExpanded(false);
 
       if (typeof pendo !== "undefined") {
         pendo.track("alarm_extraction_completed", {
@@ -674,6 +761,7 @@ export default function Home() {
       setExtractedConfirmed(false);
       setAlarmExtractionWorkflowStatus(trimmedInput ? "raw_provided" : "not_provided");
       setAlarmExtractionDraft(emptyAlarmExtractionDraftFields);
+      setIsAlarmSourceMappingExpanded(false);
       setAlarmExtractionStatus("Error");
       setAlarmExtractionError("Extraction failed. You can still fill the alarm fields manually.");
       resetDownstream();
@@ -688,6 +776,7 @@ export default function Home() {
     setExtractedConfirmed(false);
     setAlarmExtraction(null);
     setAlarmExtractionDraft(emptyAlarmExtractionDraftFields);
+    setIsAlarmSourceMappingExpanded(false);
     setAlarmExtractionStatus("Idle");
     setAlarmExtractionWorkflowStatus(text.trim() ? "raw_provided" : "not_provided");
     setAlarmExtractionError("");
@@ -1014,6 +1103,7 @@ export default function Home() {
     setInputMode("none");
     setExtractedFields(emptyAlarmFields);
     setAlarmExtractionDraft(emptyAlarmExtractionDraftFields);
+    setIsAlarmSourceMappingExpanded(false);
     setExtractedConfirmed(false);
     setAlarmExtraction(null);
     setAlarmExtractionStatus("Idle");
@@ -1193,74 +1283,62 @@ export default function Home() {
     }
   };
 
-  const handleGenerateBrief = async () => {
-    if (!canGenerateBrief || !ruleDecision) {
-      return;
+  const requestGeneratedDiagnosticBrief = async () => {
+    if (!ruleDecision) {
+      throw new Error("Triage Checks must run before a Decision Brief can be generated.");
     }
 
     setBriefStatus("Loading");
     setBriefError("");
-    setBrief(null);
-    setGeneratedBrief(null);
-    setWorkRecord(null);
-    setDecisionState(initialDecisionState);
-    setCopyStatus("Idle");
 
     const generationStart = getTelemetryNow();
+    const response = await fetch("/api/generate-brief", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        alarm,
+        recentAlarms: normalizedInput.recentAlarms,
+        workRecords: normalizedInput.workRecords,
+        context,
+        ruleEngineOutput: ruleDecision
+      })
+    });
+    const data = (await response.json()) as unknown;
 
-    try {
-      const response = await fetch("/api/generate-brief", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          alarm,
-          recentAlarms: normalizedInput.recentAlarms,
-          workRecords: normalizedInput.workRecords,
-          context,
-          ruleEngineOutput: ruleDecision
-        })
-      });
-      const data = (await response.json()) as unknown;
-
-      if (!response.ok) {
-        throw new Error(getApiErrorMessage(data));
-      }
-
-      if (!isGeneratedDiagnosticBrief(data)) {
-        throw new Error("The generated brief did not match the expected format.");
-      }
-
-      setGeneratedBrief(data);
-      setBrief(mapGeneratedBriefToDiagnosticBrief(data, ruleDecision));
-      setBriefStatus("Idle");
-
-      if (typeof pendo !== "undefined") {
-        pendo.track("diagnostic_brief_generated", {
-          mode: ruleDecision.mode,
-          contextCoverage: ruleDecision.contextCoverage,
-          normalizedPriority: data.priority_wo_readiness.normalized_priority,
-          woReadiness: data.priority_wo_readiness.wo_readiness,
-          suggestedDecision: data.suggested_next_move.recommended_decision_state ?? "",
-          missingChecksCount: data.missing_checks.length,
-          hasRecentAlarms: normalizedInput.recentAlarms.length > 0,
-          hasWorkRecords: normalizedInput.workRecords.length > 0,
-          hasOperatingContext: Boolean(context.operatorNotes),
-          generationDuration: Math.round(getTelemetryNow() - generationStart)
-        });
-      }
-    } catch (error) {
-      setBriefStatus("Error");
-      setBriefError(error instanceof Error ? error.message : "Failed to generate the brief.");
+    if (!response.ok) {
+      throw new Error(getApiErrorMessage(data));
     }
+
+    if (!isGeneratedDiagnosticBrief(data)) {
+      throw new Error("The generated brief did not match the expected format.");
+    }
+
+    const nextBrief = mapGeneratedBriefToDiagnosticBrief(data, ruleDecision);
+
+    if (typeof pendo !== "undefined") {
+      pendo.track("diagnostic_brief_generated", {
+        mode: ruleDecision.mode,
+        contextCoverage: ruleDecision.contextCoverage,
+        normalizedPriority: data.priority_wo_readiness.normalized_priority,
+        woReadiness: data.priority_wo_readiness.wo_readiness,
+        suggestedDecision: data.suggested_next_move.recommended_decision_state ?? "",
+        missingChecksCount: data.missing_checks.length,
+        hasRecentAlarms: normalizedInput.recentAlarms.length > 0,
+        hasWorkRecords: normalizedInput.workRecords.length > 0,
+        hasOperatingContext: Boolean(context.operatorNotes),
+        generationDuration: Math.round(getTelemetryNow() - generationStart)
+      });
+    }
+
+    return { generatedBrief: data, brief: nextBrief };
   };
 
-  const handleGenerateNote = async () => {
+  const handleGenerateDecisionBrief = async () => {
     if (
-      !brief ||
-      !generatedBrief ||
       !ruleDecision ||
+      !humanValidationSummary ||
       !decisionAlignment ||
       decisionState.selectedDecision === "" ||
       isDecisionReasonMissing
@@ -1268,11 +1346,29 @@ export default function Home() {
       return;
     }
 
+    setBriefStatus("Loading");
+    setBriefError("");
     setNoteStatus("Loading");
     setNoteError("");
-    setWorkRecord(null);
-    setCopyStatus("Idle");
-    resetFeedbackState();
+
+    let generatedDiagnosticBrief: GeneratedDiagnosticBrief;
+    let diagnosticBrief: DiagnosticBrief;
+
+    try {
+      const result = await requestGeneratedDiagnosticBrief();
+      generatedDiagnosticBrief = result.generatedBrief;
+      diagnosticBrief = result.brief;
+    } catch (error) {
+      setBriefStatus("Error");
+      setBriefError(
+        error instanceof Error
+          ? `Could not generate the optional Decision Brief. Previous brief is still shown if available. ${error.message}`
+          : "Could not generate the optional Decision Brief. Previous brief is still shown if available."
+      );
+      setNoteStatus("Idle");
+      setNoteError("");
+      return;
+    }
 
     const generationStart = getTelemetryNow();
 
@@ -1288,7 +1384,7 @@ export default function Home() {
           confirmedWorkRecords: normalizedInput.workRecords,
           confirmedOperatingContext: context,
           triageResult: ruleDecision,
-          generatedBrief,
+          generatedBrief: generatedDiagnosticBrief,
           selectedHumanDecision: decisionState.selectedDecision,
           humanDecisionReason: decisionState.validationNote,
           decisionAlignment
@@ -1301,41 +1397,52 @@ export default function Home() {
       }
 
       if (!isGeneratedOperationalNote(data)) {
-        throw new Error("The generated operational note did not match the expected format.");
+        throw new Error("The handover note section did not match the expected format.");
       }
 
       const nextRecord = generateOperationalNote(
         alarm,
-        brief,
+        diagnosticBrief,
         decisionState.selectedDecision,
         decisionState.validationNote,
         data.operationalNote
       );
 
+      setGeneratedBrief(generatedDiagnosticBrief);
+      setBrief(diagnosticBrief);
       setWorkRecord(nextRecord);
       setDecisionState((current) => ({
         ...current,
         operationalNote: nextRecord.operationalNote
       }));
+      setBriefStatus("Idle");
       setNoteStatus("Idle");
+      setBriefError("");
+      setNoteError("");
+      setCopyStatus("Idle");
 
       if (typeof pendo !== "undefined") {
         pendo.track("operational_note_generated", {
           selectedDecision: decisionState.selectedDecision,
-          aiSuggestedDecision: generatedBrief?.suggested_next_move.recommended_decision_state ?? "",
+          aiSuggestedDecision: humanValidationSummary.primaryDecisionState,
           decisionAlignmentStatus: decisionAlignment?.alignment ?? "",
           hasValidationNote: Boolean(decisionState.validationNote.trim()),
           validationNoteLength: decisionState.validationNote.length,
           normalizedPriority: ruleDecision?.priority.normalizedPriority ?? "",
-          woReadiness: generatedBrief?.priority_wo_readiness.wo_readiness ?? "",
+          woReadiness: generatedDiagnosticBrief.priority_wo_readiness.wo_readiness,
           mode: ruleDecision?.mode ?? "",
           contextCoverage: ruleDecision?.contextCoverage ?? "",
           generationDuration: Math.round(getTelemetryNow() - generationStart)
         });
       }
     } catch (error) {
+      setBriefStatus("Idle");
       setNoteStatus("Error");
-      setNoteError(error instanceof Error ? error.message : "Failed to generate the operational note.");
+      setNoteError(
+        error instanceof Error
+          ? `Could not finish the optional Decision Brief. Previous brief is still shown if available. ${error.message}`
+          : "Could not finish the optional Decision Brief. Previous brief is still shown if available."
+      );
     }
   };
 
@@ -1357,7 +1464,16 @@ export default function Home() {
   };
 
   const saveFeedback = async (useful: boolean, tags: FeedbackTag[], comment: string) => {
-    if (!workRecord || !generatedBrief || !ruleDecision || decisionState.selectedDecision === "") {
+    if (
+      !ruleDecision ||
+      !humanValidationSummary ||
+      decisionState.selectedDecision === "" ||
+      isDecisionReasonMissing
+    ) {
+      if (isDecisionReasonMissing) {
+        setFeedbackStatus("Error");
+        setFeedbackError("Add the required decision reason before submitting feedback.");
+      }
       return;
     }
 
@@ -1383,6 +1499,8 @@ export default function Home() {
       ruleEngineOutput: ruleDecision,
       generatedBrief,
       humanDecisionState: decisionState.selectedDecision,
+      aiSuggestedDecisionState: humanValidationSummary.primaryDecisionState,
+      woReadiness: generatedBrief?.priority_wo_readiness.wo_readiness,
       useful,
       tags,
       comment,
@@ -1422,7 +1540,7 @@ export default function Home() {
         mode: ruleDecision?.mode ?? "",
         contextCoverage: ruleDecision?.contextCoverage ?? "",
         humanDecisionState: decisionState.selectedDecision,
-        aiSuggestedDecision: generatedBrief?.suggested_next_move.recommended_decision_state ?? "",
+        aiSuggestedDecision: humanValidationSummary.primaryDecisionState,
         normalizedPriority: ruleDecision?.priority.normalizedPriority ?? "",
         woReadiness: generatedBrief?.priority_wo_readiness.wo_readiness ?? "",
         scenarioType: record.scenario_type ?? "",
@@ -1433,6 +1551,10 @@ export default function Home() {
   };
 
   const handleUsefulFeedback = () => {
+    if (!canSubmitFeedback) {
+      return;
+    }
+
     setFeedbackChoice("Useful");
     setFeedbackSelectedTags([]);
     setFeedbackComment("");
@@ -1440,6 +1562,10 @@ export default function Home() {
   };
 
   const handleNeedsAdjustmentFeedback = () => {
+    if (!canSubmitFeedback) {
+      return;
+    }
+
     setFeedbackChoice("Needs adjustment");
     setFeedbackStatus("Idle");
     setFeedbackError("");
@@ -1456,6 +1582,10 @@ export default function Home() {
   };
 
   const handleSaveNeedsAdjustmentFeedback = () => {
+    if (!canSubmitFeedback) {
+      return;
+    }
+
     void saveFeedback(false, feedbackSelectedTags, feedbackComment);
   };
 
@@ -1500,7 +1630,11 @@ export default function Home() {
     }
   };
 
-  const clearOperationalNoteState = () => {
+  const clearDecisionBriefState = () => {
+    setBrief(null);
+    setGeneratedBrief(null);
+    setBriefStatus("Idle");
+    setBriefError("");
     setWorkRecord(null);
     setNoteStatus("Idle");
     setNoteError("");
@@ -1508,33 +1642,90 @@ export default function Home() {
     resetFeedbackState();
   };
 
+  const startNewCase = () => {
+    if (!confirmingStartNewCase) {
+      setConfirmingStartNewCase(true);
+      return;
+    }
+
+    setConfirmingStartNewCase(false);
+
+    if (typeof pendo !== "undefined") {
+      pendo.track("workflow_reset", {
+        hadAlarmInput: Boolean(rawAlarmInput.trim()),
+        hadContextInput:
+          hasOperatingContextInput(contextInput) || hasRecentAlarmsRawInput || hasWorkRecordsRawInput,
+        hadBrief: Boolean(brief),
+        hadDecision: hasSelectedDecision,
+        hadOperationalNote: Boolean(workRecord),
+        hadFeedback: Boolean(lastSavedFeedbackSignature),
+        demoDataLoaded
+      });
+    }
+
+    setRawAlarmInput("");
+    setAlarmFileName("");
+    setInputMode("none");
+    setManualFields(emptyAlarmFields);
+    setExtractedFields(emptyAlarmFields);
+    setExtractedConfirmed(false);
+    setAdvancedDetails(emptyAdvancedAlarmDetails);
+    setContextInput(emptyContextInput);
+    resetExtractionState();
+    resetDownstream();
+    setDemoDataLoaded(false);
+  };
+
+  const cancelStartNewCase = () => {
+    setConfirmingStartNewCase(false);
+  };
+
+  const focusHumanDecisionReason = () => {
+    const element = document.getElementById("human-decision-reason");
+
+    element?.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
+      element.focus();
+    }
+  };
+
   const updateSelectedDecision = (selectedDecision: TriageDecision | "") => {
+    const decisionChanged = selectedDecision !== decisionState.selectedDecision;
+    const hasPreservedNote = decisionState.validationNote.trim().length > 0;
+
+    setShowPreservedValidationNoteHelper(
+      Boolean(decisionChanged && selectedDecision && hasPreservedNote)
+    );
     setDecisionState((current) => ({
       ...current,
       selectedDecision,
-      operationalNote: ""
+      operationalNote: "",
+      feedback: null
     }));
-    clearOperationalNoteState();
+    clearDecisionBriefState();
 
     if (typeof pendo !== "undefined" && selectedDecision) {
-      const aiSuggested = generatedBrief?.suggested_next_move.recommended_decision_state ?? "";
+      const suggestedDecision = humanValidationSummary?.primaryDecisionState ?? "";
       pendo.track("human_decision_selected", {
         selectedDecision,
-        aiSuggestedDecision: aiSuggested,
-        decisionAlignmentStatus: selectedDecision === aiSuggested ? "aligned" : "mismatch",
-        normalizedPriority: generatedBrief?.priority_wo_readiness.normalized_priority ?? "",
-        woReadiness: generatedBrief?.priority_wo_readiness.wo_readiness ?? ""
+        aiSuggestedDecision: suggestedDecision,
+        decisionAlignmentStatus: selectedDecision === suggestedDecision ? "aligned" : "mismatch",
+        normalizedPriority: ruleDecision?.priority.normalizedPriority ?? "",
+        woReadiness: ""
       });
     }
   };
 
   const updateHumanDecisionReason = (validationNote: string) => {
+    setShowPreservedValidationNoteHelper(false);
     setDecisionState((current) => ({
       ...current,
       validationNote,
-      operationalNote: ""
+      operationalNote: "",
+      feedback: null
     }));
-    clearOperationalNoteState();
+    clearDecisionBriefState();
   };
 
   return (
@@ -1544,8 +1735,8 @@ export default function Home() {
           <p className="eyebrow">Public hackathon prototype</p>
           <h1 id="page-title">AlarmReady</h1>
           <p className="lede">
-            Move from a raw solar monitoring alarm to a Pre-WO Diagnostic Brief for human
-            validation.
+            Turn alarm, diagnostic, ticket-history, and operating context into a short
+            human-validation checkpoint before work or ticket changes are propagated.
           </p>
         </div>
         <div className="trustBanner" aria-label="Safety and trust guardrails">
@@ -1567,6 +1758,34 @@ export default function Home() {
               <ListChecks aria-hidden="true" />
               Load Context-Rich Example
             </button>
+            {hasActiveCaseData ? (
+              <div className="startNewCaseConfirm">
+                <div className="startNewCaseActions">
+                  <button
+                    type="button"
+                    className={confirmingStartNewCase ? "secondaryButton destructiveButton" : "ghostButton"}
+                    onClick={startNewCase}
+                  >
+                    <RefreshCcw aria-hidden="true" />
+                    {confirmingStartNewCase ? "Confirm start new case" : "Start new case"}
+                  </button>
+                  {confirmingStartNewCase ? (
+                    <button type="button" className="inlineTextButton" onClick={cancelStartNewCase}>
+                      Cancel
+                    </button>
+                  ) : null}
+                </div>
+                {confirmingStartNewCase ? (
+                  <p
+                    className="startNewCaseHint"
+                    role="status"
+                    title="Clears inputs, extracted context, confirmations, triage results, decision, feedback, and optional brief."
+                  >
+                    Clears current case data.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -1698,11 +1917,15 @@ export default function Home() {
               </div>
               <div className="statusCluster">
                 <StatusBadge label={alarmExtractionWorkflowStatus} />
-                <StatusBadge label={`Confidence: ${alarmExtractionDraft.confidence}`} />
+                <StatusBadge
+                  label={`Confidence: ${getVisibleConfidence(
+                    alarmExtractionDraft.confidence,
+                    !extractedValidation.isValid
+                  )}`}
+                />
               </div>
             </div>
             <MissingFields missingFields={extractedValidation.missingFields} />
-            {alarmExtraction ? <AlarmExtractionSummary extraction={alarmExtraction} /> : null}
             <div className="formGrid manualGrid">
               <AlarmExtractionDraftField
                 label="site/plant"
@@ -1756,6 +1979,34 @@ export default function Home() {
                 onChange={updateAlarmExtractionDraftField}
               />
             </div>
+            <div className="sourceMapping">
+              <button
+                type="button"
+                className="inlineTextButton sourceMappingToggle"
+                aria-expanded={isAlarmSourceMappingExpanded}
+                onClick={() => setIsAlarmSourceMappingExpanded((current) => !current)}
+              >
+                {isAlarmSourceMappingExpanded ? "Hide source mapping" : "Show source mapping"}
+              </button>
+              {isAlarmSourceMappingExpanded ? (
+                <dl className="sourceMappingList">
+                  {alarmSourceMappings.map((mapping) => (
+                    <div className="sourceMappingRow" key={mapping.label}>
+                      <dt>{mapping.label}</dt>
+                      <dd>
+                        {mapping.sourceText ? (
+                          <>from &quot;{mapping.sourceText}&quot;</>
+                        ) : (
+                          <span className="sourceMappingFallback">
+                            Source line not available; review extracted value against raw input.
+                          </span>
+                        )}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+            </div>
             <div className="buttonRow extractionActions">
               <button
                 type="button"
@@ -1790,11 +2041,11 @@ export default function Home() {
         <section className="optionalContextSection" aria-labelledby="optional-context-heading">
           <div className="optionalContextHeader">
             <span className="optionalContextSummary">
-              <strong id="optional-context-heading">Add optional context</strong>
+              <strong id="optional-context-heading">Add system context</strong>
               <span>
-                Optional context improves duplicate checks, related-work checks, priority
-                normalization, and WO readiness. Context is optional, but provided context must be
-                extracted and confirmed before it affects triage.
+                Add monitoring-system diagnostics, recent alarms, ticket history, operating
+                conditions, or notes that affect the human decision. Confirm extracted context
+                before it affects triage.
               </span>
               <span className="contextCompactSummary">{optionalContextStatusSummary}</span>
             </span>
@@ -1821,6 +2072,11 @@ export default function Home() {
                     <span className="miniMeta">
                       {getOptionalContextStatusLabel(recentAlarmsExtractionWorkflowStatus)}
                     </span>
+                    {recentAlarmsExtraction ? (
+                      <ConfidenceBadge
+                        confidence={getSectionConfidence(recentAlarmsExtraction.records)}
+                      />
+                    ) : null}
                     <button
                       type="button"
                       className="smallToggleButton"
@@ -1896,6 +2152,11 @@ export default function Home() {
                     <span className="miniMeta">
                       {getOptionalContextStatusLabel(workRecordsExtractionWorkflowStatus)}
                     </span>
+                    {workRecordsExtraction ? (
+                      <ConfidenceBadge
+                        confidence={getSectionConfidence(workRecordsExtraction.records)}
+                      />
+                    ) : null}
                     <button
                       type="button"
                       className="smallToggleButton"
@@ -2157,102 +2418,86 @@ export default function Home() {
           )}
         </section>
 
-        <section className="actionBand" aria-label="Brief actions">
-          <div className="actionCopy">
-            <p>Review the local triage checks before generating the brief.</p>
-            {!canGenerateBrief ? (
-              <p className="helperText compact">
-                Triage Checks must run on confirmed input before a Pre-WO Diagnostic Brief can be
-                generated.
-              </p>
-            ) : null}
-          </div>
-          <button
-            type="button"
-            className="primaryButton"
-            onClick={handleGenerateBrief}
-            disabled={!canGenerateBrief || briefStatus === "Loading"}
-          >
-            <FileText aria-hidden="true" />
-            {briefStatus === "Loading" ? "Generating brief..." : "Generate Pre-WO Diagnostic Brief"}
-          </button>
-          {briefStatus === "Error" ? <p className="errorText">{briefError}</p> : null}
-        </section>
-
-        <section className="panel briefPanel" aria-labelledby="brief-heading">
-          <div className="panelHeader">
-            <div>
-              <p className="eyebrow">Pre-WO Diagnostic Brief</p>
-              <h2 id="brief-heading">{brief?.title ?? "Brief Preview"}</h2>
-            </div>
-            {brief ? (
-              <CheckCircle2 className="readyIcon" aria-hidden="true" />
-            ) : (
-              <Info aria-hidden="true" />
-            )}
-          </div>
-
-          {generatedBrief ? (
-            <GeneratedBriefContent brief={generatedBrief} />
-          ) : brief ? (
-            <div className="briefContent">
-              <p className="summaryText">{brief.summary}</p>
-              <div className="briefColumns">
-                <BriefList title="Evidence" items={brief.evidence} />
-                <BriefList title="Context Signals" items={brief.contextSignals} />
-                <BriefList title="Human Validation" items={brief.humanValidation} />
-                <BriefList title="Data Gaps" items={brief.dataGaps} />
+        {humanValidationSummary ? (
+          <section className="panel humanValidationPanel" aria-labelledby="validation-summary-heading">
+            <div className="panelHeader compactHeader">
+              <div>
+                <p className="eyebrow">Decision-first output</p>
+                <h2 id="validation-summary-heading">Human Validation Summary</h2>
               </div>
-              <div className="safetyNote">{brief.safetyStatement}</div>
+              <span className="statusPill">
+                {decisionLabels[humanValidationSummary.primaryDecisionState]}
+              </span>
             </div>
-          ) : briefStatus === "Loading" ? (
-            <div className="emptyState">
-              <FileText aria-hidden="true" />
-              <p>Generating Pre-WO Diagnostic Brief...</p>
+            <div className="validationSummaryGrid">
+              <div className="validationSummaryItem primary">
+                <span>Recommended human decision</span>
+                <strong>{humanValidationSummary.recommendedHumanDecision}</strong>
+              </div>
+              <div className="validationSummaryItem">
+                <span>Why human validation is needed</span>
+                <p>{humanValidationSummary.whyValidationNeeded}</p>
+              </div>
+              <div className="validationSummaryItem">
+                <span>Action to approve or update</span>
+                <p>{humanValidationSummary.actionToApproveOrUpdate}</p>
+              </div>
+              <div className="validationSummaryItem">
+                <span>Evidence needed before propagation</span>
+                <ul>
+                  {humanValidationSummary.evidenceNeeded.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="validationSummaryItem risk">
+                <span>Risk if skipped</span>
+                <p>{humanValidationSummary.riskIfSkipped}</p>
+              </div>
             </div>
-          ) : (
-            <div className="emptyState">
-              <FileText aria-hidden="true" />
-              <p>No Pre-WO Diagnostic Brief generated yet.</p>
-            </div>
-          )}
-        </section>
+          </section>
+        ) : null}
+
       </div>
 
       <section
-        className={brief ? "panel decisionPanel" : "panel decisionPanel isDeemphasized"}
+        className={
+          humanValidationSummary ? "panel decisionPanel" : "panel decisionPanel isDeemphasized"
+        }
         aria-labelledby="decision-heading"
       >
         <div className="panelHeader">
           <div>
             <p className="eyebrow">Human decision</p>
-            <h2 id="decision-heading">Operational Decision</h2>
+            <h2 id="decision-heading">Select final human decision</h2>
           </div>
-          {generatedBrief ? (
+          {humanValidationSummary ? (
             <span className="guardrailPill">Human validation required</span>
           ) : null}
         </div>
 
         <div className="aiSuggestionBox" aria-live="polite">
-          {generatedBrief ? (
+          {humanValidationSummary ? (
             <>
               <p>
-                <strong>AI suggested next move:</strong>{" "}
-                {generatedBrief.suggested_next_move.recommended}
+                <strong>Suggested human validation decision:</strong>{" "}
+                {humanValidationSummary.recommendedHumanDecision}
               </p>
               <p>
                 <strong>Supporting action:</strong>{" "}
-                {generatedBrief.suggested_next_move.supporting_action ||
+                {humanValidationSummary.actionToApproveOrUpdate ||
                   "Supporting action not specified."}
               </p>
             </>
           ) : (
-            <p>AI suggested next move will appear after the Pre-WO Diagnostic Brief is generated.</p>
-          )}
-          {generatedBrief ? (
             <p>
-              Use this as guidance only. The operational decision must be selected by the human
-              reviewer.
+              Suggested human validation decision will appear after Triage Checks run on confirmed
+              input.
+            </p>
+          )}
+          {humanValidationSummary ? (
+            <p>
+              The operational decision must be selected by the human reviewer.
             </p>
           ) : null}
         </div>
@@ -2262,7 +2507,7 @@ export default function Home() {
             <span>Decision</span>
             <select
               value={decisionState.selectedDecision}
-              disabled={!brief}
+              disabled={!humanValidationSummary}
               onChange={(event) => updateSelectedDecision(event.target.value as TriageDecision)}
             >
               <option value="" disabled>
@@ -2278,13 +2523,19 @@ export default function Home() {
           <label>
             <span>Human decision reason</span>
             <textarea
+              id="human-decision-reason"
               rows={4}
-              disabled={!brief}
+              disabled={!humanValidationSummary}
               value={decisionState.validationNote}
-              placeholder="Add a short rationale, especially if your decision differs from the suggested next move or WO readiness."
+              placeholder="Add a short rationale, especially if your decision differs from the suggested human validation decision."
               onChange={(event) => updateHumanDecisionReason(event.target.value)}
             />
           </label>
+          {showPreservedValidationNoteHelper && decisionState.validationNote.trim() ? (
+            <p className="helperText compact wideField">
+              Reviewer note preserved after decision change. Please review it before continuing.
+            </p>
+          ) : null}
         </div>
 
         {decisionAlignment ? (
@@ -2294,156 +2545,196 @@ export default function Home() {
           />
         ) : null}
 
-        <div className="buttonRow decisionActions">
-          <button
-            type="button"
-            className="primaryButton"
-            onClick={handleGenerateNote}
-            disabled={!canGenerateNote || noteStatus === "Loading"}
-          >
-            <ClipboardCheck aria-hidden="true" />
-            {noteStatus === "Loading" ? "Generating note..." : "Generate Operational Note"}
-          </button>
-          <button
-            type="button"
-            className="secondaryButton"
-            onClick={copyNote}
-            disabled={!workRecord?.operationalNote}
-          >
-            <Clipboard aria-hidden="true" />
-            {copyStatus === "Idle" ? "Copy note" : copyStatus}
-          </button>
-          <button
-            type="button"
-            className="ghostButton"
-            onClick={() => {
-              if (typeof pendo !== "undefined") {
-                pendo.track("workflow_reset", {
-                  hadAlarmInput: Boolean(rawAlarmInput.trim()),
-                  hadContextInput: hasOperatingContextInput(contextInput) || hasRecentAlarmsRawInput || hasWorkRecordsRawInput,
-                  hadBrief: Boolean(brief),
-                  hadDecision: hasSelectedDecision,
-                  hadOperationalNote: Boolean(workRecord),
-                  hadFeedback: Boolean(lastSavedFeedbackSignature),
-                  demoDataLoaded
-                });
-              }
-
-              setRawAlarmInput("");
-              setAlarmFileName("");
-              setInputMode("none");
-              setManualFields(emptyAlarmFields);
-              setExtractedFields(emptyAlarmFields);
-              setExtractedConfirmed(false);
-              setAdvancedDetails(emptyAdvancedAlarmDetails);
-              setContextInput(emptyContextInput);
-              resetExtractionState();
-              resetDownstream();
-              setDemoDataLoaded(false);
-            }}
-          >
-            <RefreshCcw aria-hidden="true" />
-            Reset
-          </button>
-        </div>
-
-        {noteStatus === "Error" ? <p className="errorText">{noteError}</p> : null}
-
-        {workRecord ? (
-          <div className="noteBox" aria-live="polite">
-            <div className="noteMeta">
-              <span>{workRecord.workRecordId}</span>
-              <span>{workRecord.dispatchStatus}</span>
-            </div>
-            <pre>{workRecord.operationalNote}</pre>
-          </div>
+        {decisionAlignment ? (
+          <DecisionCapturedState
+            alignment={decisionAlignment}
+            reasonMissing={isDecisionReasonMissing}
+          />
         ) : null}
       </section>
 
-      {workRecord ? (
+      {hasSelectedDecision ? (
+        <section className="panel decisionBriefPanel" aria-labelledby="decision-brief-heading">
+          <div className="panelHeader">
+            <div>
+              <p className="eyebrow">Optional artifact</p>
+              <h2 id="decision-brief-heading">Optional Decision Brief</h2>
+            </div>
+            {workRecord ? <CheckCircle2 className="readyIcon" aria-hidden="true" /> : null}
+          </div>
+
+          <p className="helperText">
+            Generate this only if you need a report, handover note, or evidence trail after
+            selecting the human decision.
+          </p>
+
+          <div className="buttonRow decisionActions">
+            <button
+              type="button"
+              className="secondaryButton"
+              onClick={handleGenerateDecisionBrief}
+              disabled={!canGenerateDecisionBrief || briefStatus === "Loading" || noteStatus === "Loading"}
+            >
+              <ClipboardCheck aria-hidden="true" />
+              {briefStatus === "Loading" || noteStatus === "Loading"
+                ? "Generating decision brief..."
+                : "Generate optional decision brief"}
+            </button>
+            <button
+              type="button"
+              className="secondaryButton"
+              onClick={copyNote}
+              disabled={!workRecord?.operationalNote}
+            >
+              <Clipboard aria-hidden="true" />
+              {copyStatus === "Idle" ? "Copy handover note" : copyStatus}
+            </button>
+          </div>
+
+          {isDecisionReasonMissing ? (
+            <p className="helperText compact">
+              Reason required before generating the Decision Brief because this is a high-risk
+              mismatch.
+            </p>
+          ) : null}
+          {briefStatus === "Error" ? <p className="errorText">{briefError}</p> : null}
+          {noteStatus === "Error" ? <p className="errorText">{noteError}</p> : null}
+
+          {workRecord && generatedBrief && humanValidationSummary && ruleDecision ? (
+            <>
+              {briefStatus === "Loading" || noteStatus === "Loading" ? (
+                <p className="helperText compact">
+                  Generating updated optional Decision Brief... Previous version remains visible.
+                </p>
+              ) : null}
+              <DecisionBriefContent
+                alarm={alarm}
+                decisionState={decisionState}
+                generatedBrief={generatedBrief}
+                humanValidationSummary={humanValidationSummary}
+                ruleDecision={ruleDecision}
+                workRecord={workRecord}
+              />
+            </>
+          ) : briefStatus === "Loading" || noteStatus === "Loading" ? (
+            <div className="emptyState compact">
+              <FileText aria-hidden="true" />
+              <p>Generating optional Decision Brief...</p>
+            </div>
+          ) : briefStatus === "Error" || noteStatus === "Error" ? null : (
+            <div className="emptyState compact">
+              <FileText aria-hidden="true" />
+              <p>No optional Decision Brief generated yet.</p>
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {hasSelectedDecision ? (
         <section className="panel feedbackPanel" aria-labelledby="feedback-heading">
           <div className="panelHeader compactHeader">
             <div>
               <p className="eyebrow">Feedback</p>
-              <h2 id="feedback-heading">Was this useful?</h2>
+              <h2 id="feedback-heading">
+                Was this validation summary useful for choosing the next human decision?
+              </h2>
             </div>
           </div>
+          <p className="helperText compact">
+            Rate the Human Validation Summary and decision flow. The optional Decision Brief is
+            only for reporting or handover.
+          </p>
 
-          <div className="feedbackControls" aria-label="Feedback choice">
-            <button
-              type="button"
-              className={feedbackChoice === "Useful" ? "feedbackButton active" : "feedbackButton"}
-              onClick={handleUsefulFeedback}
-            >
-              <ThumbsUp aria-hidden="true" />
-              Useful
-            </button>
-            <button
-              type="button"
-              className={
-                feedbackChoice === "Needs adjustment" ? "feedbackButton active" : "feedbackButton"
-              }
-              onClick={handleNeedsAdjustmentFeedback}
-            >
-              <ThumbsDown aria-hidden="true" />
-              Needs adjustment
-            </button>
-          </div>
-
-          {feedbackChoice === "Needs adjustment" ? (
-            <div className="feedbackDetails">
-              <div className="feedbackTagGrid" aria-label="Feedback issue tags">
-                {feedbackTags.map((tag) => (
-                  <button
-                    key={tag}
-                    type="button"
-                    className={
-                      feedbackSelectedTags.includes(tag)
-                        ? "feedbackTagButton active"
-                        : "feedbackTagButton"
-                    }
-                    onClick={() => toggleFeedbackTag(tag)}
-                  >
-                    {tag}
-                  </button>
-                ))}
-              </div>
-
-              <label>
-                <span>Optional comment</span>
-                <textarea
-                  rows={3}
-                  value={feedbackComment}
-                  placeholder="What should be improved?"
-                  onChange={(event) => {
-                    setFeedbackComment(event.target.value);
-                    setFeedbackStatus("Idle");
-                    setFeedbackError("");
-                  }}
-                />
-              </label>
-              <p className="helperText compact">
-                Please do not include personal data, real site names, customer names, or
-                confidential operational details.
+          {!canSubmitFeedback ? (
+            <div className="feedbackBlocked" aria-live="polite">
+              <strong>Feedback available after the required reason is captured.</strong>
+              <p>
+                This high-risk mismatch needs a short human rationale before feedback or an
+                optional Decision Brief can continue.
               </p>
-
-              <div className="buttonRow feedbackActions">
+              <button type="button" className="secondaryButton" onClick={focusHumanDecisionReason}>
+                Add rationale
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="feedbackControls" aria-label="Feedback choice">
                 <button
                   type="button"
-                  className="secondaryButton"
-                  onClick={handleSaveNeedsAdjustmentFeedback}
-                  disabled={!canSaveNeedsAdjustmentFeedback || isNeedsAdjustmentDuplicate}
+                  className={feedbackChoice === "Useful" ? "feedbackButton active" : "feedbackButton"}
+                  onClick={handleUsefulFeedback}
                 >
-                  Save feedback
+                  <ThumbsUp aria-hidden="true" />
+                  Useful
                 </button>
-                {!canSaveNeedsAdjustmentFeedback ? (
-                  <p className="helperText compact">
-                    Select at least one tag or add a short comment.
-                  </p>
-                ) : null}
+                <button
+                  type="button"
+                  className={
+                    feedbackChoice === "Needs adjustment" ? "feedbackButton active" : "feedbackButton"
+                  }
+                  onClick={handleNeedsAdjustmentFeedback}
+                >
+                  <ThumbsDown aria-hidden="true" />
+                  Needs adjustment
+                </button>
               </div>
-            </div>
-          ) : null}
+
+              {feedbackChoice === "Needs adjustment" ? (
+                <div className="feedbackDetails">
+                  <div className="feedbackTagGrid" aria-label="Feedback issue tags">
+                    {feedbackTags.map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        className={
+                          feedbackSelectedTags.includes(tag)
+                            ? "feedbackTagButton active"
+                            : "feedbackTagButton"
+                        }
+                        onClick={() => toggleFeedbackTag(tag)}
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+
+                  <label>
+                    <span>Optional comment</span>
+                    <textarea
+                      rows={3}
+                      value={feedbackComment}
+                      placeholder="What should be improved?"
+                      onChange={(event) => {
+                        setFeedbackComment(event.target.value);
+                        setFeedbackStatus("Idle");
+                        setFeedbackError("");
+                      }}
+                    />
+                  </label>
+                  <p className="helperText compact">
+                    Please do not include personal data, real site names, customer names, or
+                    confidential operational details.
+                  </p>
+
+                  <div className="buttonRow feedbackActions">
+                    <button
+                      type="button"
+                      className="secondaryButton"
+                      onClick={handleSaveNeedsAdjustmentFeedback}
+                      disabled={!canSaveNeedsAdjustmentFeedback || isNeedsAdjustmentDuplicate}
+                    >
+                      Save feedback
+                    </button>
+                    {!canSaveNeedsAdjustmentFeedback ? (
+                      <p className="helperText compact">
+                        Select at least one tag or add a short comment.
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+            </>
+          )}
 
           <p className="helperText compact">
             {getFeedbackStorageHelperText(feedbackStorageMode)}
@@ -2485,6 +2776,7 @@ export default function Home() {
           ) : null}
         </section>
       ) : null}
+
     </main>
   );
 }
@@ -2558,29 +2850,149 @@ function formatDemoAlarmExport(fields: AlarmConfirmationFields) {
   ].join("\n");
 }
 
+function getAlarmSourceMappings(
+  draft: AlarmExtractionDraftFields,
+  evidence: AlarmExtractionResult["evidence"],
+  rawInput: string
+): AlarmSourceMapping[] {
+  const fields: Array<{
+    label: string;
+    value: string;
+    aliases: string[];
+  }> = [
+    {
+      label: "site/plant",
+      value: draft.sitePlant,
+      aliases: ["sitePlant", "site/plant", "site", "plant"]
+    },
+    {
+      label: "asset/device",
+      value: draft.assetDevice,
+      aliases: ["assetDevice", "asset/device", "asset", "device", "inverter"]
+    },
+    {
+      label: "alarm text/code",
+      value: draft.alarmTextCode,
+      aliases: ["alarmTextCode", "alarm text/code", "alarm", "alarm code", "faultCode", "fault code"]
+    },
+    {
+      label: "timestamp",
+      value: draft.timestamp,
+      aliases: ["timestamp", "time", "date", "event time"]
+    },
+    {
+      label: "severity",
+      value: draft.severity,
+      aliases: ["severity", "priority", "level"]
+    },
+    {
+      label: "short note",
+      value: draft.shortNote,
+      aliases: ["shortNote", "short note", "note", "message", "rawMessage"]
+    }
+  ];
+
+  return fields.map((field) => ({
+    label: field.label,
+    sourceText: compactSourceText(
+      findEvidenceSourceForField(field.aliases, evidence) ??
+        findSourceLineForExtractedValue(field.value, rawInput)
+    )
+  }));
+}
+
+function findEvidenceSourceForField(
+  aliases: string[],
+  evidence: AlarmExtractionResult["evidence"]
+) {
+  const normalizedAliases = aliases.map(normalizeEvidenceField);
+  const evidenceItem = evidence.find((item) =>
+    normalizedAliases.includes(normalizeEvidenceField(item.field))
+  );
+
+  return evidenceItem?.sourceText.trim() || null;
+}
+
+function findSourceLineForExtractedValue(value: string, rawInput: string) {
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue || !rawInput.trim()) {
+    return "";
+  }
+
+  const normalizedValue = normalizeSourceCandidate(trimmedValue);
+
+  if (!normalizedValue) {
+    return "";
+  }
+
+  const rawLines = rawInput
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const matchingLine = rawLines.find((line) =>
+    normalizeSourceCandidate(line).includes(normalizedValue)
+  );
+
+  return matchingLine ?? "";
+}
+
+function normalizeEvidenceField(value: string) {
+  return value
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function normalizeSourceCandidate(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compactSourceText(value: string | null) {
+  const trimmedValue = value?.trim() ?? "";
+
+  if (trimmedValue.length <= 180) {
+    return trimmedValue;
+  }
+
+  return `${trimmedValue.slice(0, 177).trim()}...`;
+}
+
 function getWorkflowSteps(
-  hasBrief: boolean,
-  hasDecision: boolean,
-  hasOperationalNote: boolean,
-  hasFeedback: boolean
+  hasMeaningfulInput: boolean,
+  hasRuleDecision: boolean,
+  hasHumanValidationSummary: boolean,
+  hasValidCompletedDecision: boolean,
+  hasFeedback: boolean,
+  hasDecisionBrief: boolean
 ): WorkflowStep[] {
   return [
-    { label: "Input", state: hasBrief ? "complete" : "current" },
+    { label: "Input", state: hasMeaningfulInput ? "complete" : "current" },
     {
-      label: "Brief",
-      state: !hasBrief ? "locked" : hasDecision || hasOperationalNote ? "complete" : "current"
+      label: "Confirm context",
+      state: !hasMeaningfulInput ? "locked" : hasRuleDecision ? "complete" : "current"
     },
     {
-      label: "Human Decision",
-      state: !hasBrief ? "locked" : hasDecision ? "complete" : "current"
-    },
-    {
-      label: "Operational Note",
-      state: !hasDecision ? "locked" : hasOperationalNote ? "complete" : "current"
+      label: "Review & decide",
+      state: !hasHumanValidationSummary
+        ? "locked"
+        : hasValidCompletedDecision
+          ? "complete"
+          : "current"
     },
     {
       label: "Feedback",
-      state: !hasOperationalNote ? "locked" : hasFeedback ? "complete" : "current"
+      state: !hasValidCompletedDecision ? "locked" : hasFeedback ? "complete" : "current"
+    },
+    {
+      label: "Optional brief",
+      state: !hasValidCompletedDecision ? "locked" : hasDecisionBrief ? "complete" : "current"
     }
   ];
 }
@@ -2785,11 +3197,19 @@ function isSourceStatus(value: string): value is SourceStatus {
   ].includes(value);
 }
 
+function isActiveSourceStatus(status: SourceStatus) {
+  return status !== "not_provided" && status !== "cleared";
+}
+
+function hasAnyAlarmConfirmationField(fields: AlarmConfirmationFields) {
+  return Object.values(fields).some((value) => value.trim().length > 0);
+}
+
 function getContextSourceSummary(statuses: Record<OptionalContextSource, OptionalContextStatus>) {
   const activeStatuses = Object.values(statuses).filter((status) => status !== "not_provided");
 
   if (activeStatuses.length === 0) {
-    return "Context source: no optional context provided";
+    return "Context source: no system context provided";
   }
 
   if (activeStatuses.every((status) => status === "confirmed")) {
@@ -2807,7 +3227,7 @@ function getOptionalContextStatusSummary(
   );
 
   if (activeStatuses.length === 0) {
-    return "No optional context provided";
+    return "No system context provided";
   }
 
   const counts = activeStatuses.reduce<Partial<Record<OptionalContextStatus, number>>>(
@@ -2884,26 +3304,34 @@ function StatusBadge({ label }: { label: string }) {
   return <span className="statusPill">{isSourceStatus(label) ? getSourceStatusLabel(label) : label}</span>;
 }
 
-function AlarmExtractionSummary({ extraction }: { extraction: AlarmExtractionResult }) {
-  return (
-    <details className="extractionSummary">
-      <summary>Show extraction evidence</summary>
-      <div className="extractionSummaryBody">
-        {extraction.missingFields.length > 0 ? (
-          <p>Missing from source: {extraction.missingFields.join(", ")}</p>
-        ) : (
-          <p>Required fields were extracted from the supplied text.</p>
-        )}
-        <ul>
-          {extraction.evidence.slice(0, 6).map((item) => (
-            <li key={`${item.field}-${item.sourceText}`}>
-              <strong>{item.field}:</strong> {item.sourceText}
-            </li>
-          ))}
-        </ul>
-      </div>
-    </details>
-  );
+function ConfidenceBadge({ confidence }: { confidence: SectionConfidence }) {
+  return <span className="miniMeta">Confidence: {confidence}</span>;
+}
+
+function getVisibleConfidence(confidence: unknown, isIncomplete = false): ExtractionConfidence {
+  if (isIncomplete) {
+    return "low";
+  }
+
+  return confidence === "high" || confidence === "medium" || confidence === "low"
+    ? confidence
+    : "medium";
+}
+
+function getSectionConfidence(
+  records: Array<Partial<Pick<ExtractedRecentAlarm | ExtractedWorkRecord, "confidence">>>
+): SectionConfidence {
+  if (records.length === 0) {
+    return "low";
+  }
+
+  const confidenceValues = records.map((record) => getVisibleConfidence(record.confidence));
+
+  if (confidenceValues.some((confidence) => confidence === "low")) {
+    return "low";
+  }
+
+  return confidenceValues.every((confidence) => confidence === "high") ? "high" : "medium";
 }
 
 function RecentAlarmsExtractionSummary({
@@ -2932,6 +3360,7 @@ function RecentAlarmsExtractionSummary({
         <div className="statusCluster">
           <span className="miniMeta">{extraction.records.length} records</span>
           <span className="miniMeta">{getOptionalContextStatusLabel(workflowStatus)}</span>
+          <ConfidenceBadge confidence={getSectionConfidence(extraction.records)} />
         </div>
       </div>
       <ul>
@@ -2997,6 +3426,7 @@ function WorkRecordsExtractionSummary({
         <div className="statusCluster">
           <span className="miniMeta">{extraction.records.length} records</span>
           <span className="miniMeta">{getOptionalContextStatusLabel(workflowStatus)}</span>
+          <ConfidenceBadge confidence={getSectionConfidence(extraction.records)} />
         </div>
       </div>
       <ul>
@@ -3077,8 +3507,10 @@ function OperatingContextExtractionSummary({
       <div className="compactHeader">
         <h3>Extracted operating context</h3>
         <div className="statusCluster">
-          <span className="miniMeta">confidence {extraction.confidence}</span>
           <span className="miniMeta">{getOptionalContextStatusLabel(workflowStatus)}</span>
+          <span className="miniMeta">
+            Confidence: {getVisibleConfidence(extraction.confidence, extractedSignals.length === 0)}
+          </span>
         </div>
       </div>
       <ul>
@@ -3226,6 +3658,435 @@ type TriageChecksView = {
   priorityReasoning: PriorityReasoningGroups;
 };
 
+function evaluateHumanValidationDecisionAlignment({
+  suggestedDecision,
+  selectedHumanDecision,
+  triageResult
+}: {
+  suggestedDecision: TriageDecision;
+  selectedHumanDecision: TriageDecision;
+  triageResult: RuleEngineDecision;
+}): DecisionAlignment {
+  const passiveDecisions: TriageDecision[] = ["monitor", "defer", "false_not_actionable"];
+  const strongerThanRemoteDecisions: TriageDecision[] = ["create_new_wo", "escalate"];
+  const selectedIsPassive = passiveDecisions.includes(selectedHumanDecision);
+  const duplicateWorkRisk = hasRelatedWorkRiskForAlignment(triageResult);
+  const safetyContext = hasSafetyRelevantSummaryContext(triageResult);
+  const highPriority = triageResult.priority.normalizedPriority === "high";
+
+  if (safetyContext && selectedIsPassive) {
+    return {
+      alignment: "high_risk_mismatch",
+      mismatchType: "safety_context_downgraded",
+      message: "Safety-relevant context exists. Add a clear rationale and review/escalation trigger.",
+      requiresReason: true
+    };
+  }
+
+  if (duplicateWorkRisk && selectedHumanDecision === "create_new_wo") {
+    return {
+      alignment: "high_risk_mismatch",
+      mismatchType: "duplicate_work_risk",
+      message:
+        "Triage checks suggest existing work may already cover this issue. Confirm why a new WO is needed and consider linking to the existing WO.",
+      requiresReason: true
+    };
+  }
+
+  if (suggestedDecision === "remote_verify" && selectedHumanDecision === "create_new_wo") {
+    return {
+      alignment: "high_risk_mismatch",
+      mismatchType: "not_ready_but_create_work",
+      message:
+        "Triage checks indicate more verification may be needed before creating work. Add why creating a WO is still appropriate.",
+      requiresReason: true
+    };
+  }
+
+  if ((highPriority || suggestedDecision === "escalate") && selectedIsPassive) {
+    return {
+      alignment: "high_risk_mismatch",
+      mismatchType: "under_response_risk",
+      message:
+        "The selected decision is less active than the triage recommendation. Add a review trigger or rationale before generating the Decision Brief.",
+      requiresReason: true
+    };
+  }
+
+  if (
+    (suggestedDecision === "monitor" || suggestedDecision === "remote_verify") &&
+    strongerThanRemoteDecisions.includes(selectedHumanDecision)
+  ) {
+    return {
+      alignment: "mismatch",
+      mismatchType: "over_response_risk",
+      message:
+        "The selected decision is stronger than the triage recommendation. Add the additional context that justifies this action.",
+      requiresReason: false
+    };
+  }
+
+  if (suggestedDecision === "update_existing_wo" && selectedHumanDecision === "remote_verify") {
+    return {
+      alignment: "mismatch",
+      mismatchType: "unclear",
+      message:
+        "Triage guidance suggests updating the existing WO as the primary action. Remote verification can still be included as the supporting condition.",
+      requiresReason: false
+    };
+  }
+
+  if (suggestedDecision !== selectedHumanDecision) {
+    return {
+      alignment: "mismatch",
+      mismatchType: "unclear",
+      message:
+        "The selected decision differs from the suggested human validation decision. Add a short rationale so the Decision Brief preserves why you chose a different action.",
+      requiresReason: false
+    };
+  }
+
+  return {
+    alignment: "aligned",
+    mismatchType: "unclear",
+    message: "",
+    requiresReason: false
+  };
+}
+
+function hasRelatedWorkRiskForAlignment(triageResult: RuleEngineDecision) {
+  const riskCodes = new Set([
+    "duplicate_wo_risk",
+    "update_or_link_open_wo",
+    "update_scheduled_wo_first",
+    "possible_failed_closure"
+  ]);
+
+  return getAllFindings(triageResult).some((finding) => riskCodes.has(finding.code));
+}
+
+function hasSafetyRelevantSummaryContext(triageResult: RuleEngineDecision) {
+  const referenceSafety = triageResult.faultCodeReference?.safetyRelevance;
+
+  return (
+    referenceSafety === "safety_relevant" ||
+    referenceSafety === "safety_critical" ||
+    triageResult.priority.highPriorityOverrides.some((override) =>
+      /safety|hse|fire|electrical|arc|grounding|shock|compliance/i.test(override)
+    ) ||
+    triageResult.priority.reasonFragments.some((reason) =>
+      /safety|hse|fire|electrical|arc|grounding|shock|compliance/i.test(reason)
+    )
+  );
+}
+
+function getHumanValidationSummary({
+  alarm,
+  generatedBrief,
+  ruleDecision
+}: {
+  alarm: AlarmRecord;
+  generatedBrief: GeneratedDiagnosticBrief | null;
+  ruleDecision: RuleEngineDecision;
+}): HumanValidationSummary {
+  const existingWorkLabel = getExistingWorkLabelFromRuleDecision(ruleDecision);
+  const primaryDecisionState = getValidationPrimaryDecisionState(ruleDecision, generatedBrief);
+  const briefAlignedWithDecision = isBriefDecisionAligned(generatedBrief, primaryDecisionState);
+  const recommendedHumanDecision = getValidationDecisionLabel(
+    primaryDecisionState,
+    generatedBrief,
+    existingWorkLabel
+  );
+  const actionToApproveOrUpdate = getValidationAction(
+    primaryDecisionState,
+    alarm,
+    ruleDecision,
+    generatedBrief,
+    existingWorkLabel,
+    briefAlignedWithDecision
+  );
+
+  return {
+    primaryDecisionState,
+    recommendedHumanDecision,
+    whyValidationNeeded: getValidationReason(ruleDecision, alarm, existingWorkLabel),
+    actionToApproveOrUpdate,
+    evidenceNeeded: getValidationEvidence(
+      ruleDecision,
+      generatedBrief,
+      existingWorkLabel,
+      primaryDecisionState,
+      briefAlignedWithDecision
+    ),
+    riskIfSkipped: getValidationRisk(ruleDecision, primaryDecisionState, existingWorkLabel)
+  };
+}
+
+function getValidationPrimaryDecisionState(
+  ruleDecision: RuleEngineDecision,
+  generatedBrief: GeneratedDiagnosticBrief | null
+): TriageDecision {
+  const structuredDecision = generatedBrief?.suggested_next_move.recommended_decision_state;
+
+  if (hasExistingWorkSignal(ruleDecision)) {
+    return "update_existing_wo";
+  }
+
+  if (
+    ruleDecision.faultCodeReference?.safetyRelevance === "safety_critical" ||
+    ruleDecision.priority.normalizedPriority === "high"
+  ) {
+    return "escalate";
+  }
+
+  if (structuredDecision) {
+    return structuredDecision;
+  }
+
+  if (ruleDecision.contextCoverage === "low") {
+    return "remote_verify";
+  }
+
+  if (ruleDecision.priority.normalizedPriority === "low" && getAllFindings(ruleDecision).length === 0) {
+    return "monitor";
+  }
+
+  return "remote_verify";
+}
+
+function getValidationDecisionLabel(
+  decisionState: TriageDecision,
+  generatedBrief: GeneratedDiagnosticBrief | null,
+  existingWorkLabel: string | null
+) {
+  if (
+    generatedBrief &&
+    isBriefDecisionAligned(generatedBrief, decisionState) &&
+    generatedBrief.suggested_next_move.recommended.trim()
+  ) {
+    return generatedBrief.suggested_next_move.recommended;
+  }
+
+  if (decisionState === "update_existing_wo") {
+    return `Update existing ${existingWorkLabel ?? "WO"}`;
+  }
+
+  return decisionLabels[decisionState];
+}
+
+function getValidationReason(
+  ruleDecision: RuleEngineDecision,
+  alarm: AlarmRecord,
+  existingWorkLabel: string | null
+) {
+  const assetLabel = alarm.assetId || alarm.assetType || "the asset";
+  const referenceName = ruleDecision.faultCodeReference?.name;
+  const safetyContext =
+    ruleDecision.faultCodeReference?.safetyRelevance === "safety_critical"
+      ? "safety-critical"
+      : ruleDecision.faultCodeReference?.safetyRelevance === "safety_relevant"
+        ? "safety-relevant"
+        : "";
+
+  if (existingWorkLabel && referenceName && safetyContext) {
+    return `An open or related WO already exists for ${assetLabel}, but ${referenceName} adds ${safetyContext} context that may not be covered by the current work scope.`;
+  }
+
+  if (existingWorkLabel) {
+    return `Existing work may already cover ${assetLabel}, so a human should confirm whether to update or link it before new work is created.`;
+  }
+
+  if (referenceName && safetyContext) {
+    return `${referenceName} is ${safetyContext} reference context, so evidence and next-step ownership need human validation.`;
+  }
+
+  if (ruleDecision.contextCoverage === "low") {
+    return "Only the current alarm is confirmed, so missing context must be reviewed before ticket changes propagate.";
+  }
+
+  if (ruleDecision.priority.normalizedPriority === "high") {
+    return "Local rules normalized this alarm to High priority, so escalation or response ownership needs human validation.";
+  }
+
+  if (getAllFindings(ruleDecision).length > 0) {
+    return "Repeat or related-work signals exist and need human review before the alarm changes the work plan.";
+  }
+
+  return "AlarmReady has organized the confirmed inputs, but a human must validate the operational next step.";
+}
+
+function getValidationAction(
+  decisionState: TriageDecision,
+  alarm: AlarmRecord,
+  ruleDecision: RuleEngineDecision,
+  generatedBrief: GeneratedDiagnosticBrief | null,
+  existingWorkLabel: string | null,
+  briefAlignedWithDecision: boolean
+) {
+  const supportingAction = briefAlignedWithDecision
+    ? generatedBrief?.suggested_next_move.supporting_action?.trim()
+    : "";
+
+  if (supportingAction) {
+    return supportingAction;
+  }
+
+  const alarmDescriptor = getAlarmDescriptor(alarm, ruleDecision);
+
+  if (decisionState === "update_existing_wo") {
+    return `Add ${alarmDescriptor}, related-alarm context, operating context, and evidence needs to ${existingWorkLabel ?? "the existing WO"} before creating separate work.`;
+  }
+
+  if (decisionState === "remote_verify") {
+    return `Remote-verify ${alarmDescriptor} persistence and collect missing evidence before approving WO creation.`;
+  }
+
+  if (decisionState === "create_new_wo") {
+    return `Approve a new WO only after confirming existing work does not already cover ${alarmDescriptor}.`;
+  }
+
+  if (decisionState === "escalate") {
+    return `Package ${alarmDescriptor}, priority rationale, and missing evidence for expert/OEM/manager review.`;
+  }
+
+  if (decisionState === "defer") {
+    return `Defer ticket changes only with a review time, SLA rationale, and trigger for reopening or escalation.`;
+  }
+
+  if (decisionState === "false_not_actionable") {
+    return `Mark non-actionable only with the evidence basis and a clear reopen trigger.`;
+  }
+
+  return `Monitor ${alarmDescriptor} with an explicit review interval and escalation trigger.`;
+}
+
+function getValidationEvidence(
+  ruleDecision: RuleEngineDecision,
+  generatedBrief: GeneratedDiagnosticBrief | null,
+  existingWorkLabel: string | null,
+  decisionState: TriageDecision,
+  briefAlignedWithDecision: boolean
+) {
+  const reference = ruleDecision.faultCodeReference;
+  const isFaultCode39 = Boolean(reference?.codes.includes("39"));
+  const compatibleBriefEvidence = briefAlignedWithDecision
+    ? getCompatibleBriefEvidence(generatedBrief, decisionState)
+    : [];
+  const candidates = [
+    isFaultCode39 && "Monitoring-system fault record for Fault code 39 with timestamp.",
+    isFaultCode39 && "ISO / array insulation trend or resistance-to-ground evidence.",
+    existingWorkLabel &&
+      `${existingWorkLabel} scope/update evidence and prior related WO close-out evidence if available.`,
+    ...((reference?.evidenceToRequest ?? []).slice(0, 3)),
+    ...compatibleBriefEvidence
+  ].filter((item): item is string => Boolean(item));
+
+  return uniqueText(candidates.map(normalizeValidationEvidenceText)).slice(0, 3);
+}
+
+function isBriefDecisionAligned(
+  generatedBrief: GeneratedDiagnosticBrief | null,
+  decisionState: TriageDecision
+) {
+  return generatedBrief?.suggested_next_move.recommended_decision_state === decisionState;
+}
+
+// The generated brief may enrich the card, but only when it agrees with the deterministic
+// primary decision selected from local rules.
+function getCompatibleBriefEvidence(
+  generatedBrief: GeneratedDiagnosticBrief | null,
+  decisionState: TriageDecision
+) {
+  if (!generatedBrief) {
+    return [];
+  }
+
+  return generatedBrief.evidence_to_request.filter((evidence) =>
+    isBriefEvidenceCompatibleWithDecision(evidence, decisionState)
+  );
+}
+
+function isBriefEvidenceCompatibleWithDecision(evidence: string, decisionState: TriageDecision) {
+  const normalized = evidence.toLowerCase();
+
+  if (
+    decisionState !== "create_new_wo" &&
+    /\b(create|prepare|open)\s+(a\s+)?(new\s+)?(wo|work order)\b/.test(normalized)
+  ) {
+    return false;
+  }
+
+  if (
+    decisionState !== "false_not_actionable" &&
+    /(close|mark).*(false alarm|not actionable)|false alarm closure/.test(normalized)
+  ) {
+    return false;
+  }
+
+  if (
+    !["create_new_wo", "escalate"].includes(decisionState) &&
+    /dispatch technician immediately|immediate dispatch|automatic dispatch/.test(normalized)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function normalizeValidationEvidenceText(evidence: string) {
+  return evidence.replace(/\biSolarCloud\b/gi, "Monitoring-system");
+}
+
+function getValidationRisk(
+  ruleDecision: RuleEngineDecision,
+  decisionState: TriageDecision,
+  existingWorkLabel: string | null
+) {
+  if (decisionState === "update_existing_wo" || existingWorkLabel) {
+    return "A new WO may duplicate existing work, or the existing WO may proceed without the latest safety-relevant context.";
+  }
+
+  if (ruleDecision.faultCodeReference?.safetyRelevance === "safety_critical") {
+    return "Safety-critical context may be under-reviewed before escalation ownership is clear.";
+  }
+
+  if (ruleDecision.contextCoverage === "low") {
+    return "A ticket change may propagate with missing context that could change priority or readiness.";
+  }
+
+  if (decisionState === "monitor" || decisionState === "defer") {
+    return "The condition may persist or repeat without a clear review trigger.";
+  }
+
+  return "The work plan may move forward without the evidence needed for a clean technician handoff.";
+}
+
+function getAlarmDescriptor(alarm: AlarmRecord, ruleDecision: RuleEngineDecision) {
+  const reference = ruleDecision.faultCodeReference;
+
+  if (reference?.codes.length) {
+    return `Fault code ${reference.codes[0]} — ${reference.name}`;
+  }
+
+  return alarm.alarmType || alarm.rawMessage || "the alarm";
+}
+
+function hasExistingWorkSignal(ruleDecision: RuleEngineDecision) {
+  return getAllFindings(ruleDecision).some((finding) =>
+    ["duplicate_wo_risk", "update_or_link_open_wo", "update_scheduled_wo_first"].includes(
+      finding.code
+    )
+  );
+}
+
+function getExistingWorkLabelFromRuleDecision(ruleDecision: RuleEngineDecision) {
+  const evidenceText = getAllFindings(ruleDecision)
+    .flatMap((finding) => finding.evidence)
+    .join(" ");
+
+  return evidenceText.match(/\bWO-\d+\b/i)?.[0].toUpperCase() ?? null;
+}
+
 function DecisionAlignmentWarning({
   alignment,
   reasonMissing
@@ -3246,10 +4107,60 @@ function DecisionAlignmentWarning({
       {isHighRisk && reasonMissing ? (
         <p>Reason required because your decision differs from the triage recommendation.</p>
       ) : alignment.requiresReason ? (
-        <p>Reason captured. The note will use the human-selected decision.</p>
+        <p>Reason captured. The Decision Brief will use the human-selected decision.</p>
       ) : (
-        <p>Recommended: add a short rationale so the note preserves why you chose a different action.</p>
+        <p>Recommended: add a short rationale so the Decision Brief preserves why you chose a different action.</p>
       )}
+    </div>
+  );
+}
+
+function DecisionCapturedState({
+  alignment,
+  reasonMissing
+}: {
+  alignment: DecisionAlignment;
+  reasonMissing: boolean;
+}) {
+  if (alignment.alignment === "high_risk_mismatch" && reasonMissing) {
+    return (
+      <div className="decisionCapturedState highRisk" aria-live="polite">
+        <strong>High-risk mismatch detected</strong>
+        <p>This decision requires a reason before continuing.</p>
+      </div>
+    );
+  }
+
+  if (alignment.alignment === "high_risk_mismatch") {
+    return (
+      <div className="decisionCapturedState highRisk" aria-live="polite">
+        <strong>Final human decision selected</strong>
+        <p>
+          Override reason captured. You can stop here, submit feedback, or generate an optional
+          decision brief if you need documentation.
+        </p>
+      </div>
+    );
+  }
+
+  if (alignment.alignment === "mismatch") {
+    return (
+      <div className="decisionCapturedState mismatch" aria-live="polite">
+        <strong>Final human decision selected</strong>
+        <p>This differs from the suggested human validation decision. The final decision remains yours.</p>
+        <p>You can add a reason, submit feedback, or generate an optional decision brief if you need documentation.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="decisionCapturedState" aria-live="polite">
+      <strong>Final human decision selected</strong>
+      <p>Your decision is aligned with the suggested human validation decision.</p>
+      <p>
+        You can stop here, submit feedback, or generate an optional decision brief if you need a
+        report, handover note, or evidence trail.
+      </p>
     </div>
   );
 }
@@ -3299,8 +4210,8 @@ function getTriageChecks(decision: RuleEngineDecision, contextInput: ContextInpu
 function getContextCoverageCard(decision: RuleEngineDecision): TriageCardModel {
   const status = formatContextLevel(decision.contextCoverage);
   const explanations = {
-    low: "Current alarm only; optional context was not supplied.",
-    medium: "Current alarm plus one optional context source is available.",
+    low: "Current alarm only; system context was not supplied.",
+    medium: "Current alarm plus one system context source is available.",
     high: "Alarm, recent alarms, work records, and site/SLA context are available."
   };
 
@@ -3626,98 +4537,108 @@ function FileUpload({
   );
 }
 
-function BriefList({ title, items }: { title: string; items: string[] }) {
-  return (
-    <div className="briefList">
-      <h3>{title}</h3>
-      <ul>
-        {items.map((item) => (
-          <li key={item}>{item}</li>
-        ))}
-      </ul>
-    </div>
-  );
-}
+function DecisionBriefContent({
+  alarm,
+  decisionState,
+  generatedBrief,
+  humanValidationSummary,
+  ruleDecision,
+  workRecord
+}: {
+  alarm: AlarmRecord;
+  decisionState: DecisionState;
+  generatedBrief: GeneratedDiagnosticBrief;
+  humanValidationSummary: HumanValidationSummary;
+  ruleDecision: RuleEngineDecision;
+  workRecord: WorkRecord;
+}) {
+  const selectedDecision = decisionState.selectedDecision;
+  const decisionLabel = selectedDecision ? decisionLabels[selectedDecision] : "No decision selected";
+  const decisionBasis = getDecisionBriefBasis(ruleDecision, humanValidationSummary, generatedBrief);
 
-function GeneratedBriefContent({ brief }: { brief: GeneratedDiagnosticBrief }) {
   return (
-    <div className="numberedBrief">
+    <div className="decisionBriefContent">
       <section className="briefSection">
-        <h3>1. Situation</h3>
-        <p>{brief.situation}</p>
+        <h3>1. Final human decision</h3>
+        <p>
+          <strong>{decisionLabel}</strong>
+          {decisionState.validationNote.trim()
+            ? ` — ${decisionState.validationNote.trim()}`
+            : " — No additional human rationale provided."}
+        </p>
       </section>
 
       <section className="briefSection">
-        <h3>2. Likely pattern</h3>
-        <p>{brief.likely_pattern}</p>
+        <h3>2. Current issue</h3>
+        <p>{getDecisionBriefCurrentIssue(alarm, generatedBrief)}</p>
       </section>
 
       <section className="briefSection">
-        <h3>3. Missing checks</h3>
-        <p>Top 3 things to verify before deciding:</p>
+        <h3>3. Decision basis</h3>
         <ul>
-          {brief.missing_checks.map((check) => (
-            <li key={check}>{check}</li>
+          {decisionBasis.map((item) => (
+            <li key={item}>{item}</li>
           ))}
         </ul>
       </section>
 
       <section className="briefSection">
-        <h3>4. Priority &amp; WO readiness</h3>
-        <dl className="briefFieldList">
-          <div>
-            <dt>Raw severity:</dt>
-            <dd>{brief.priority_wo_readiness.raw_severity}</dd>
-          </div>
-          <div>
-            <dt>Normalized priority:</dt>
-            <dd>{brief.priority_wo_readiness.normalized_priority}</dd>
-          </div>
-          <div>
-            <dt>WO readiness:</dt>
-            <dd>{brief.priority_wo_readiness.wo_readiness}</dd>
-          </div>
-          <div>
-            <dt>Reason:</dt>
-            <dd>{brief.priority_wo_readiness.reason}</dd>
-          </div>
-        </dl>
-      </section>
-
-      <section className="briefSection">
-        <h3>5. Suggested next move</h3>
-        <dl className="briefFieldList">
-          <div>
-            <dt>Recommended:</dt>
-            <dd>{brief.suggested_next_move.recommended}</dd>
-          </div>
-          <div>
-            <dt>Supporting action:</dt>
-            <dd>{brief.suggested_next_move.supporting_action || "Not specified."}</dd>
-          </div>
-          <div>
-            <dt>Alternative:</dt>
-            <dd>{brief.suggested_next_move.alternative}</dd>
-          </div>
-          <div>
-            <dt>Human must confirm:</dt>
-            <dd>{brief.suggested_next_move.human_must_confirm}</dd>
-          </div>
-        </dl>
-      </section>
-
-      <section className="briefSection">
-        <h3>6. Evidence to request if work proceeds</h3>
+        <h3>4. Evidence needed / evidence gap</h3>
         <ul>
-          {brief.evidence_to_request.map((evidence) => (
+          {humanValidationSummary.evidenceNeeded.slice(0, 3).map((evidence) => (
             <li key={evidence}>{evidence}</li>
           ))}
         </ul>
       </section>
 
-      <footer className="safetyNote">{brief.safety_note}</footer>
+      <section className="briefSection">
+        <h3>5. Action / handover note</h3>
+        <pre className="decisionBriefNote">{workRecord.operationalNote}</pre>
+      </section>
+
+      <footer className="safetyNote">
+        Decision support only. Not fault confirmation or automatic dispatch.
+      </footer>
     </div>
   );
+}
+
+function getDecisionBriefCurrentIssue(
+  alarm: AlarmRecord,
+  generatedBrief: GeneratedDiagnosticBrief
+) {
+  const alarmParts = [
+    alarm.alarmType,
+    alarm.assetId && `asset/device ${alarm.assetId}`,
+    alarm.siteName && `site ${alarm.siteName}`,
+    alarm.startedAt && `timestamp ${alarm.startedAt}`
+  ].filter(Boolean);
+
+  return `${alarmParts.join(" · ")}. ${generatedBrief.situation}`;
+}
+
+function getDecisionBriefBasis(
+  ruleDecision: RuleEngineDecision,
+  humanValidationSummary: HumanValidationSummary,
+  generatedBrief: GeneratedDiagnosticBrief
+) {
+  return uniqueText(
+    [
+      `Context level: ${formatContextLevel(ruleDecision.contextCoverage)}.`,
+      `Normalized priority: ${formatCoverage(ruleDecision.priority.normalizedPriority)}; ${generatedBrief.priority_wo_readiness.reason}`,
+      humanValidationSummary.whyValidationNeeded,
+      ruleDecision.faultCodeReference
+        ? `Fault-code reference: ${ruleDecision.faultCodeReference.name}; safety relevance ${formatReferenceToken(
+            ruleDecision.faultCodeReference.safetyRelevance
+          )}.`
+        : "",
+      getAllFindings(ruleDecision).length > 0
+        ? `Rule findings: ${getAllFindings(ruleDecision)
+            .map((finding) => finding.label)
+            .join("; ")}.`
+        : ""
+    ].filter(Boolean)
+  ).slice(0, 5);
 }
 
 function mapGeneratedBriefToDiagnosticBrief(

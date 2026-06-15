@@ -7,12 +7,13 @@ import type {
 export const feedbackStorageKey = "alarmready_feedback_v1";
 
 export const feedbackTags = [
-  "Too generic",
-  "Missing context",
-  "Unsafe / too confident",
-  "Wrong priority",
-  "Wrong interpretation",
-  "Wrong note type",
+  "Suggested decision was wrong",
+  "Missing important context",
+  "Evidence request was unclear",
+  "Risk warning was unclear",
+  "Too much information",
+  "Too little information",
+  "Decision options were unclear",
   "Other"
 ] as const;
 
@@ -40,8 +41,10 @@ export type FeedbackRecord = {
 
 type CreateFeedbackRecordInput = {
   ruleEngineOutput: RuleEngineDecision;
-  generatedBrief: GeneratedDiagnosticBrief;
+  generatedBrief?: GeneratedDiagnosticBrief | null;
   humanDecisionState: HumanDecisionState;
+  aiSuggestedDecisionState?: HumanDecisionState | "unknown";
+  woReadiness?: string;
   useful: boolean | null;
   tags: string[];
   comment: string;
@@ -56,9 +59,16 @@ export function createFeedbackRecord(input: CreateFeedbackRecordInput): Feedback
     context_level: mapContextCoverage(input.ruleEngineOutput.contextCoverage),
     human_decision_state: input.humanDecisionState,
     ai_suggested_decision_state:
-      input.generatedBrief.suggested_next_move.recommended_decision_state ?? "unknown",
+      input.generatedBrief?.suggested_next_move.recommended_decision_state ??
+      input.aiSuggestedDecisionState ??
+      "unknown",
     normalized_priority: input.ruleEngineOutput.priority.normalizedPriority,
-    wo_readiness: input.generatedBrief.priority_wo_readiness.wo_readiness,
+    ...(input.generatedBrief?.priority_wo_readiness.wo_readiness || input.woReadiness
+      ? {
+          wo_readiness:
+            input.generatedBrief?.priority_wo_readiness.wo_readiness ?? input.woReadiness
+        }
+      : {}),
     scenario_type: input.scenarioType,
     app_version: feedbackAppVersion,
     prompt_version: feedbackPromptVersion
