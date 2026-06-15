@@ -91,6 +91,10 @@ type ExtractionWorkflowStatus = SourceStatus;
 type OptionalContextStatus = SourceStatus;
 type OptionalContextSource = "recentAlarms" | "workRecords" | "operatingContext";
 type SectionConfidence = ExtractionConfidence;
+type AlarmSourceMapping = {
+  label: string;
+  sourceText: string;
+};
 
 type HumanValidationSummary = {
   primaryDecisionState: TriageDecision;
@@ -139,7 +143,7 @@ export default function Home() {
   const [alarmExtractionDraft, setAlarmExtractionDraft] =
     useState<AlarmExtractionDraftFields>(emptyAlarmExtractionDraftFields);
   const [extractedConfirmed, setExtractedConfirmed] = useState(false);
-  const [, setAlarmExtraction] = useState<AlarmExtractionResult | null>(null);
+  const [alarmExtraction, setAlarmExtraction] = useState<AlarmExtractionResult | null>(null);
   const [alarmExtractionStatus, setAlarmExtractionStatus] = useState<ExtractionStatus>("Idle");
   const [alarmExtractionWorkflowStatus, setAlarmExtractionWorkflowStatus] =
     useState<ExtractionWorkflowStatus>("not_provided");
@@ -214,12 +218,18 @@ export default function Home() {
   const [isRecentAlarmsExpanded, setIsRecentAlarmsExpanded] = useState(false);
   const [isWorkRecordsExpanded, setIsWorkRecordsExpanded] = useState(false);
   const [isOperatingContextExpanded, setIsOperatingContextExpanded] = useState(false);
+  const [isAlarmSourceMappingExpanded, setIsAlarmSourceMappingExpanded] = useState(false);
 
   const manualValidation = validateAlarmFields(manualFields);
   const extractedValidation = validateAlarmFields(extractedFields);
   const extractedAlarmHasFaultCode = hasExtractedAlarmFaultCode(
     alarmExtractionDraft,
     extractedFields
+  );
+  const alarmSourceMappings = getAlarmSourceMappings(
+    alarmExtractionDraft,
+    alarmExtraction?.evidence ?? [],
+    rawAlarmInput
   );
   const activeAlarmFields =
     inputMode === "manual"
@@ -396,7 +406,7 @@ export default function Home() {
   );
   const canGenerateDecisionBrief = hasValidCompletedDecision;
   const canSubmitFeedback = hasValidCompletedDecision;
-  const hasActiveCaseData = Boolean(
+  const hasMeaningfulInput = Boolean(
     demoDataLoaded ||
       hasRawAlarmInput ||
       alarmFileName ||
@@ -412,7 +422,10 @@ export default function Home() {
       operatingContextExtraction ||
       isActiveSourceStatus(recentAlarmsExtractionWorkflowStatus) ||
       isActiveSourceStatus(workRecordsExtractionWorkflowStatus) ||
-      isActiveSourceStatus(operatingContextExtractionWorkflowStatus) ||
+      isActiveSourceStatus(operatingContextExtractionWorkflowStatus)
+  );
+  const hasActiveCaseData = Boolean(
+    hasMeaningfulInput ||
       ruleDecision ||
       humanValidationSummary ||
       generatedBrief ||
@@ -439,10 +452,12 @@ export default function Home() {
   const isNeedsAdjustmentDuplicate =
     Boolean(needsAdjustmentSignature) && needsAdjustmentSignature === lastSavedFeedbackSignature;
   const workflowSteps = getWorkflowSteps(
-    Boolean(triageChecks),
+    hasMeaningfulInput,
+    Boolean(ruleDecision),
     Boolean(humanValidationSummary),
     hasValidCompletedDecision,
-    hasSavedFeedback
+    hasSavedFeedback,
+    Boolean(workRecord && generatedBrief)
   );
   const showFeedbackLog = process.env.NODE_ENV === "development";
 
@@ -505,6 +520,7 @@ export default function Home() {
     setAlarmExtractionWorkflowStatus("not_provided");
     setAlarmExtractionError("");
     setAlarmExtractionDraft(emptyAlarmExtractionDraftFields);
+    setIsAlarmSourceMappingExpanded(false);
     setAlarmRawDirty(false);
     setLastExtractedAlarmSignature("");
     setRecentAlarmsExtraction(null);
@@ -563,6 +579,7 @@ export default function Home() {
     );
     setAlarmExtractionError("");
     setAlarmExtractionDraft(emptyAlarmExtractionDraftFields);
+    setIsAlarmSourceMappingExpanded(false);
     setExtractedConfirmed(false);
     setManualFields(nextFields);
     setDemoDataLoaded(false);
@@ -651,6 +668,7 @@ export default function Home() {
     setAlarmExtractionWorkflowStatus(value.trim() ? "raw_provided" : "not_provided");
     setAlarmExtractionError("");
     setAlarmExtractionDraft(emptyAlarmExtractionDraftFields);
+    setIsAlarmSourceMappingExpanded(false);
     setExtractedFields(emptyAlarmFields);
     setExtractedConfirmed(false);
     setAlarmRawDirty(Boolean(value.trim()));
@@ -679,6 +697,7 @@ export default function Home() {
       setAlarmExtractionWorkflowStatus("not_provided");
       setAlarmExtractionError("");
       setAlarmExtractionDraft(emptyAlarmExtractionDraftFields);
+      setIsAlarmSourceMappingExpanded(false);
       setAlarmRawDirty(false);
       resetDownstream();
       return;
@@ -688,6 +707,7 @@ export default function Home() {
     setAlarmExtractionWorkflowStatus("extracting");
     setAlarmExtractionError("");
     setAlarmExtraction(null);
+    setIsAlarmSourceMappingExpanded(false);
 
     const extractionStart = getTelemetryNow();
 
@@ -718,6 +738,7 @@ export default function Home() {
       setExtractedConfirmed(false);
       setAlarmExtractionStatus("Idle");
       setAlarmExtractionWorkflowStatus("extracted_needs_confirmation");
+      setIsAlarmSourceMappingExpanded(false);
 
       if (typeof pendo !== "undefined") {
         pendo.track("alarm_extraction_completed", {
@@ -740,6 +761,7 @@ export default function Home() {
       setExtractedConfirmed(false);
       setAlarmExtractionWorkflowStatus(trimmedInput ? "raw_provided" : "not_provided");
       setAlarmExtractionDraft(emptyAlarmExtractionDraftFields);
+      setIsAlarmSourceMappingExpanded(false);
       setAlarmExtractionStatus("Error");
       setAlarmExtractionError("Extraction failed. You can still fill the alarm fields manually.");
       resetDownstream();
@@ -754,6 +776,7 @@ export default function Home() {
     setExtractedConfirmed(false);
     setAlarmExtraction(null);
     setAlarmExtractionDraft(emptyAlarmExtractionDraftFields);
+    setIsAlarmSourceMappingExpanded(false);
     setAlarmExtractionStatus("Idle");
     setAlarmExtractionWorkflowStatus(text.trim() ? "raw_provided" : "not_provided");
     setAlarmExtractionError("");
@@ -1080,6 +1103,7 @@ export default function Home() {
     setInputMode("none");
     setExtractedFields(emptyAlarmFields);
     setAlarmExtractionDraft(emptyAlarmExtractionDraftFields);
+    setIsAlarmSourceMappingExpanded(false);
     setExtractedConfirmed(false);
     setAlarmExtraction(null);
     setAlarmExtractionStatus("Idle");
@@ -1955,6 +1979,34 @@ export default function Home() {
                 onChange={updateAlarmExtractionDraftField}
               />
             </div>
+            <div className="sourceMapping">
+              <button
+                type="button"
+                className="inlineTextButton sourceMappingToggle"
+                aria-expanded={isAlarmSourceMappingExpanded}
+                onClick={() => setIsAlarmSourceMappingExpanded((current) => !current)}
+              >
+                {isAlarmSourceMappingExpanded ? "Hide source mapping" : "Show source mapping"}
+              </button>
+              {isAlarmSourceMappingExpanded ? (
+                <dl className="sourceMappingList">
+                  {alarmSourceMappings.map((mapping) => (
+                    <div className="sourceMappingRow" key={mapping.label}>
+                      <dt>{mapping.label}</dt>
+                      <dd>
+                        {mapping.sourceText ? (
+                          <>from &quot;{mapping.sourceText}&quot;</>
+                        ) : (
+                          <span className="sourceMappingFallback">
+                            Source line not available; review extracted value against raw input.
+                          </span>
+                        )}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+            </div>
             <div className="buttonRow extractionActions">
               <button
                 type="button"
@@ -2798,21 +2850,133 @@ function formatDemoAlarmExport(fields: AlarmConfirmationFields) {
   ].join("\n");
 }
 
+function getAlarmSourceMappings(
+  draft: AlarmExtractionDraftFields,
+  evidence: AlarmExtractionResult["evidence"],
+  rawInput: string
+): AlarmSourceMapping[] {
+  const fields: Array<{
+    label: string;
+    value: string;
+    aliases: string[];
+  }> = [
+    {
+      label: "site/plant",
+      value: draft.sitePlant,
+      aliases: ["sitePlant", "site/plant", "site", "plant"]
+    },
+    {
+      label: "asset/device",
+      value: draft.assetDevice,
+      aliases: ["assetDevice", "asset/device", "asset", "device", "inverter"]
+    },
+    {
+      label: "alarm text/code",
+      value: draft.alarmTextCode,
+      aliases: ["alarmTextCode", "alarm text/code", "alarm", "alarm code", "faultCode", "fault code"]
+    },
+    {
+      label: "timestamp",
+      value: draft.timestamp,
+      aliases: ["timestamp", "time", "date", "event time"]
+    },
+    {
+      label: "severity",
+      value: draft.severity,
+      aliases: ["severity", "priority", "level"]
+    },
+    {
+      label: "short note",
+      value: draft.shortNote,
+      aliases: ["shortNote", "short note", "note", "message", "rawMessage"]
+    }
+  ];
+
+  return fields.map((field) => ({
+    label: field.label,
+    sourceText: compactSourceText(
+      findEvidenceSourceForField(field.aliases, evidence) ??
+        findSourceLineForExtractedValue(field.value, rawInput)
+    )
+  }));
+}
+
+function findEvidenceSourceForField(
+  aliases: string[],
+  evidence: AlarmExtractionResult["evidence"]
+) {
+  const normalizedAliases = aliases.map(normalizeEvidenceField);
+  const evidenceItem = evidence.find((item) =>
+    normalizedAliases.includes(normalizeEvidenceField(item.field))
+  );
+
+  return evidenceItem?.sourceText.trim() || null;
+}
+
+function findSourceLineForExtractedValue(value: string, rawInput: string) {
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue || !rawInput.trim()) {
+    return "";
+  }
+
+  const normalizedValue = normalizeSourceCandidate(trimmedValue);
+
+  if (!normalizedValue) {
+    return "";
+  }
+
+  const rawLines = rawInput
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const matchingLine = rawLines.find((line) =>
+    normalizeSourceCandidate(line).includes(normalizedValue)
+  );
+
+  return matchingLine ?? "";
+}
+
+function normalizeEvidenceField(value: string) {
+  return value
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function normalizeSourceCandidate(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compactSourceText(value: string | null) {
+  const trimmedValue = value?.trim() ?? "";
+
+  if (trimmedValue.length <= 180) {
+    return trimmedValue;
+  }
+
+  return `${trimmedValue.slice(0, 177).trim()}...`;
+}
+
 function getWorkflowSteps(
-  hasTriageChecks: boolean,
+  hasMeaningfulInput: boolean,
+  hasRuleDecision: boolean,
   hasHumanValidationSummary: boolean,
   hasValidCompletedDecision: boolean,
-  hasFeedback: boolean
+  hasFeedback: boolean,
+  hasDecisionBrief: boolean
 ): WorkflowStep[] {
   return [
-    { label: "Input", state: hasTriageChecks ? "complete" : "current" },
+    { label: "Input", state: hasMeaningfulInput ? "complete" : "current" },
     {
       label: "Confirm context",
-      state: !hasTriageChecks
-        ? "locked"
-        : hasHumanValidationSummary
-          ? "complete"
-          : "current"
+      state: !hasMeaningfulInput ? "locked" : hasRuleDecision ? "complete" : "current"
     },
     {
       label: "Review & decide",
@@ -2825,6 +2989,10 @@ function getWorkflowSteps(
     {
       label: "Feedback",
       state: !hasValidCompletedDecision ? "locked" : hasFeedback ? "complete" : "current"
+    },
+    {
+      label: "Optional brief",
+      state: !hasValidCompletedDecision ? "locked" : hasDecisionBrief ? "complete" : "current"
     }
   ];
 }

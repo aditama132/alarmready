@@ -344,6 +344,47 @@ button svg {
   text-underline-offset: 2px;
 }
 
+.sourceMapping {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.sourceMappingToggle {
+  margin-left: 0;
+}
+
+.sourceMappingList {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+
+.sourceMappingRow {
+  display: grid;
+  grid-template-columns: minmax(110px, 170px) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.sourceMappingRow dt {
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.sourceMappingRow dd {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.sourceMappingFallback {
+  color: #7b7569;
+  font-style: italic;
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.52;
