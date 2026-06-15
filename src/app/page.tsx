@@ -194,6 +194,8 @@ export default function Home() {
   const [noteStatus, setNoteStatus] = useState<"Idle" | "Loading" | "Error">("Idle");
   const [noteError, setNoteError] = useState("");
   const [decisionState, setDecisionState] = useState<DecisionState>(initialDecisionState);
+  const [showPreservedValidationNoteHelper, setShowPreservedValidationNoteHelper] =
+    useState(false);
   const [copyStatus, setCopyStatus] = useState<"Idle" | "Copied" | "Copy failed">("Idle");
   const [feedbackChoice, setFeedbackChoice] = useState<FeedbackChoice>(null);
   const [feedbackSelectedTags, setFeedbackSelectedTags] = useState<FeedbackTag[]>([]);
@@ -384,20 +386,15 @@ export default function Home() {
   const isDecisionReasonRequired = Boolean(decisionAlignment?.requiresReason);
   const isDecisionReasonMissing =
     isDecisionReasonRequired && decisionState.validationNote.trim().length === 0;
-  const canGenerateDecisionBrief = Boolean(
+  const hasValidCompletedDecision = Boolean(
     ruleDecision &&
       humanValidationSummary &&
       decisionAlignment &&
       decisionState.selectedDecision &&
       !isDecisionReasonMissing
   );
-  const canSubmitFeedback = Boolean(
-    ruleDecision &&
-      humanValidationSummary &&
-      decisionAlignment &&
-      decisionState.selectedDecision &&
-      !isDecisionReasonMissing
-  );
+  const canGenerateDecisionBrief = hasValidCompletedDecision;
+  const canSubmitFeedback = hasValidCompletedDecision;
   const hasActiveCaseData = Boolean(
     demoDataLoaded ||
       hasRawAlarmInput ||
@@ -443,10 +440,8 @@ export default function Home() {
   const workflowSteps = getWorkflowSteps(
     Boolean(triageChecks),
     Boolean(humanValidationSummary),
-    hasSelectedDecision,
-    canGenerateDecisionBrief,
+    hasValidCompletedDecision,
     Boolean(workRecord),
-    canSubmitFeedback,
     hasSavedFeedback
   );
   const showFeedbackLog = process.env.NODE_ENV === "development";
@@ -539,6 +534,7 @@ export default function Home() {
     setNoteStatus("Idle");
     setNoteError("");
     setDecisionState(initialDecisionState);
+    setShowPreservedValidationNoteHelper(false);
     setCopyStatus("Idle");
     resetFeedbackState();
   };
@@ -1627,10 +1623,15 @@ export default function Home() {
   };
 
   const updateSelectedDecision = (selectedDecision: TriageDecision | "") => {
+    const decisionChanged = selectedDecision !== decisionState.selectedDecision;
+    const hasPreservedNote = decisionState.validationNote.trim().length > 0;
+
+    setShowPreservedValidationNoteHelper(
+      Boolean(decisionChanged && selectedDecision && hasPreservedNote)
+    );
     setDecisionState((current) => ({
       ...current,
       selectedDecision,
-      validationNote: selectedDecision === current.selectedDecision ? current.validationNote : "",
       operationalNote: "",
       feedback: null
     }));
@@ -1649,6 +1650,7 @@ export default function Home() {
   };
 
   const updateHumanDecisionReason = (validationNote: string) => {
+    setShowPreservedValidationNoteHelper(false);
     setDecisionState((current) => ({
       ...current,
       validationNote,
@@ -2410,6 +2412,11 @@ export default function Home() {
               onChange={(event) => updateHumanDecisionReason(event.target.value)}
             />
           </label>
+          {showPreservedValidationNoteHelper && decisionState.validationNote.trim() ? (
+            <p className="helperText compact wideField">
+              Reviewer note preserved after decision change. Please review it before continuing.
+            </p>
+          ) : null}
         </div>
 
         {decisionAlignment ? (
@@ -2717,10 +2724,8 @@ function formatDemoAlarmExport(fields: AlarmConfirmationFields) {
 function getWorkflowSteps(
   hasTriageChecks: boolean,
   hasHumanValidationSummary: boolean,
-  hasDecision: boolean,
-  canDecisionBrief: boolean,
+  hasValidCompletedDecision: boolean,
   hasDecisionBrief: boolean,
-  canFeedback: boolean,
   hasFeedback: boolean
 ): WorkflowStep[] {
   return [
@@ -2734,20 +2739,20 @@ function getWorkflowSteps(
           : "current"
     },
     {
-      label: "Review summary",
-      state: !hasHumanValidationSummary ? "locked" : hasDecision ? "complete" : "current"
-    },
-    {
-      label: "Select decision",
-      state: !hasHumanValidationSummary ? "locked" : hasDecision ? "complete" : "current"
+      label: "Review & decide",
+      state: !hasHumanValidationSummary
+        ? "locked"
+        : hasValidCompletedDecision
+          ? "complete"
+          : "current"
     },
     {
       label: "Feedback",
-      state: !canFeedback ? "locked" : hasFeedback ? "complete" : "current"
+      state: !hasValidCompletedDecision ? "locked" : hasFeedback ? "complete" : "current"
     },
     {
       label: "Optional brief",
-      state: !canDecisionBrief ? "locked" : hasDecisionBrief ? "complete" : "current"
+      state: !hasValidCompletedDecision ? "locked" : hasDecisionBrief ? "complete" : "current"
     }
   ];
 }
