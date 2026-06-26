@@ -3,7 +3,12 @@ import {
   findSungrowFaultCodeReference
 } from "./faultCodes/sungrowSgHx";
 import { evaluateDecisionAlignment } from "./decisionAlignment";
-import { mapAlarmExtractionDraftToFields, mapAlarmExtractionToDraft } from "./extraction";
+import {
+  computeMissingAlarmExtractionFields,
+  mapAlarmExtractionDraftToFields,
+  mapAlarmExtractionToDraft,
+  normalizeAlarmExtractionResult
+} from "./extraction";
 import { normalizeInput } from "./input-normalizer";
 import { contextAwareExample, quickModeExample } from "./sampleData";
 import { checkRelatedWork, normalizePriority, runRuleEngine } from "./rules";
@@ -59,6 +64,80 @@ export function runRuleAssertions() {
   assert(
     mapAlarmExtractionDraftToFields(alarmExtractionDraft).alarmTextCode.includes("Fault code 39"),
     "confirmed extracted alarm preserves visible fault code for rule lookup"
+  );
+  const completeExtraction = normalizeAlarmExtractionResult({
+    sitePlant: "Sierra Verde Solar PV",
+    assetDevice: "INV-07",
+    manufacturer: "Sungrow",
+    model: "SG350HX",
+    alarmTextCode: "Fault code 39 — Low System Insulation Resistance",
+    faultCode: "39",
+    timestamp: "2026-06-04 08:37 CEST",
+    severity: "Warning",
+    shortNote: "Appeared during morning ramp-up after overnight rain.",
+    confidence: "high",
+    missingFields: ["assetDevice"],
+    evidence: []
+  });
+  assert(
+    completeExtraction.missingFields.length === 0 && completeExtraction.confidence === "high",
+    "AR-001 complete alarm extraction keeps high confidence and no missing fields"
+  );
+  const missingTimestampExtraction = normalizeAlarmExtractionResult({
+    sitePlant: "Sierra Verde Solar PV",
+    assetDevice: "INV-07",
+    manufacturer: "Sungrow",
+    model: "SG350HX",
+    alarmTextCode: "Fault code 39 — Low System Insulation Resistance",
+    faultCode: "39",
+    timestamp: null,
+    severity: "Warning",
+    shortNote: "Appeared during morning ramp-up after overnight rain.",
+    confidence: "high",
+    missingFields: [],
+    evidence: []
+  });
+  assert(
+    missingTimestampExtraction.timestamp === null &&
+      missingTimestampExtraction.missingFields.length === 1 &&
+      missingTimestampExtraction.missingFields[0] === "timestamp" &&
+      missingTimestampExtraction.confidence === "medium",
+    "AR-002 missing timestamp is recomputed and caps high confidence to medium"
+  );
+  const missingAssetExtraction = normalizeAlarmExtractionResult({
+    sitePlant: "Sierra Verde Solar PV",
+    assetDevice: null,
+    manufacturer: "Sungrow",
+    model: "SG350HX",
+    alarmTextCode: "Fault code 39 — Low System Insulation Resistance",
+    faultCode: "39",
+    timestamp: "2026-06-04 08:37 CEST",
+    severity: null,
+    shortNote: null,
+    confidence: "high",
+    missingFields: ["assetDevice", "alarmTextCode"],
+    evidence: [
+      {
+        field: "alarmTextCode",
+        sourceText: "alarm text/code: Fault code 39 — Low System Insulation Resistance"
+      }
+    ]
+  });
+  assert(
+    missingAssetExtraction.assetDevice === null &&
+      missingAssetExtraction.manufacturer === "Sungrow" &&
+      missingAssetExtraction.model === "SG350HX" &&
+      missingAssetExtraction.alarmTextCode ===
+        "Fault code 39 — Low System Insulation Resistance" &&
+      missingAssetExtraction.missingFields.length === 1 &&
+      missingAssetExtraction.missingFields[0] === "assetDevice" &&
+      !missingAssetExtraction.missingFields.includes("alarmTextCode") &&
+      missingAssetExtraction.confidence === "medium",
+    "AR-003 populated alarmTextCode is removed from missingFields while missing asset remains"
+  );
+  assert(
+    computeMissingAlarmExtractionFields({ shortNote: "   " }, ["shortNote"])[0] === "shortNote",
+    "blank required extraction fields are treated as missing"
   );
   const extractedAlarmInput = normalizeInput(
     mapAlarmExtractionDraftToFields(alarmExtractionDraft),
@@ -202,6 +281,7 @@ export function runRuleAssertions() {
     "code 39 lookup",
     "timestamp non-match",
     "extracted alarm fault-code display",
+    "alarm extraction missing-field normalization",
     "SLA phrase matching",
     "production-impact text scoring",
     "closed-WO recurrence detection",

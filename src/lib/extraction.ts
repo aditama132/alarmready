@@ -3,7 +3,7 @@ import type {
   ContextInput,
   OperatingContextChip
 } from "./input-normalizer";
-import { emptyAlarmFields } from "./input-normalizer";
+import { emptyAlarmFields, requiredAlarmFields } from "./input-normalizer";
 
 export type ExtractionConfidence = "low" | "medium" | "high";
 
@@ -26,6 +26,15 @@ export type AlarmExtractionResult = {
   missingFields: string[];
   evidence: ExtractionEvidence[];
 };
+
+export type AlarmExtractionRequiredField = keyof Pick<
+  AlarmExtractionResult,
+  "sitePlant" | "assetDevice" | "alarmTextCode" | "timestamp" | "severity" | "shortNote"
+>;
+
+export const requiredAlarmExtractionFields: AlarmExtractionRequiredField[] = [
+  ...requiredAlarmFields
+];
 
 export type AlarmExtractionDraftFields = {
   sitePlant: string;
@@ -142,6 +151,29 @@ export function mapAlarmExtractionDraftToFields(
   };
 }
 
+export function normalizeAlarmExtractionResult(
+  extraction: AlarmExtractionResult,
+  requiredFields: readonly AlarmExtractionRequiredField[] = requiredAlarmExtractionFields
+): AlarmExtractionResult {
+  const missingFields = computeMissingAlarmExtractionFields(extraction, requiredFields);
+
+  return {
+    ...extraction,
+    confidence:
+      missingFields.length > 0 && extraction.confidence === "high"
+        ? "medium"
+        : extraction.confidence,
+    missingFields
+  };
+}
+
+export function computeMissingAlarmExtractionFields(
+  extraction: Partial<Pick<AlarmExtractionResult, AlarmExtractionRequiredField>>,
+  requiredFields: readonly AlarmExtractionRequiredField[] = requiredAlarmExtractionFields
+) {
+  return requiredFields.filter((field) => !hasRequiredExtractionValue(extraction[field]));
+}
+
 export function formatAlarmTextCodeWithFaultCode(alarmTextCode: string, faultCode: string) {
   const alarmText = alarmTextCode.trim();
   const code = faultCode.trim();
@@ -159,6 +191,10 @@ export function formatAlarmTextCodeWithFaultCode(alarmTextCode: string, faultCod
   }
 
   return `Fault code ${code} — ${alarmText}`;
+}
+
+function hasRequiredExtractionValue(value: string | null | undefined) {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function alarmTextContainsFaultCode(alarmText: string, faultCode: string) {

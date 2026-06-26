@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isAlarmExtractionResult } from "@/lib/extraction";
+import { isAlarmExtractionResult, normalizeAlarmExtractionResult } from "@/lib/extraction";
 import {
   OpenAiResponseError,
   isRecord,
@@ -116,7 +116,7 @@ export async function POST(request: Request) {
       throw new Error("OpenAI response did not match the expected alarm extraction schema.");
     }
 
-    return NextResponse.json(parsed);
+    return NextResponse.json(normalizeAlarmExtractionResult(parsed));
   } catch (error) {
     if (error instanceof OpenAiResponseError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
