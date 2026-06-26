@@ -101,8 +101,8 @@ export function runRuleAssertions() {
     missingTimestampExtraction.timestamp === null &&
       missingTimestampExtraction.missingFields.length === 1 &&
       missingTimestampExtraction.missingFields[0] === "timestamp" &&
-      missingTimestampExtraction.confidence === "medium",
-    "AR-002 missing timestamp is recomputed and caps high confidence to medium"
+      missingTimestampExtraction.confidence === "low",
+    "AR-002 missing timestamp is recomputed and forces low confidence"
   );
   const missingAssetExtraction = normalizeAlarmExtractionResult({
     sitePlant: "Sierra Verde Solar PV",
@@ -132,9 +132,46 @@ export function runRuleAssertions() {
       missingAssetExtraction.missingFields.length === 1 &&
       missingAssetExtraction.missingFields[0] === "assetDevice" &&
       !missingAssetExtraction.missingFields.includes("alarmTextCode") &&
-      missingAssetExtraction.confidence === "medium",
+      missingAssetExtraction.confidence === "low",
     "AR-003 populated alarmTextCode is removed from missingFields while missing asset remains"
   );
+  const confidenceValues = ["high", "medium", "low"] as const;
+  for (const confidence of confidenceValues) {
+    assert(
+      normalizeAlarmExtractionResult({
+        sitePlant: "Sierra Verde Solar PV",
+        assetDevice: "INV-07",
+        manufacturer: "Sungrow",
+        model: "SG350HX",
+        alarmTextCode: "Fault code 39 — Low System Insulation Resistance",
+        faultCode: "39",
+        timestamp: "2026-06-04 08:37 CEST",
+        severity: "Warning",
+        shortNote: "Appeared during morning ramp-up after overnight rain.",
+        confidence,
+        missingFields: [],
+        evidence: []
+      }).confidence === confidence,
+      `complete alarm extraction preserves model ${confidence} confidence`
+    );
+    assert(
+      normalizeAlarmExtractionResult({
+        sitePlant: "Sierra Verde Solar PV",
+        assetDevice: null,
+        manufacturer: "Sungrow",
+        model: "SG350HX",
+        alarmTextCode: "Fault code 39 — Low System Insulation Resistance",
+        faultCode: "39",
+        timestamp: "2026-06-04 08:37 CEST",
+        severity: "Warning",
+        shortNote: "Appeared during morning ramp-up after overnight rain.",
+        confidence,
+        missingFields: [],
+        evidence: []
+      }).confidence === "low",
+      `missing required alarm field forces model ${confidence} confidence to low`
+    );
+  }
   assert(
     computeMissingAlarmExtractionFields({ shortNote: "   " }, ["shortNote"])[0] === "shortNote",
     "blank required extraction fields are treated as missing"

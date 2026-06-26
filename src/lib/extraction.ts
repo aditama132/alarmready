@@ -159,10 +159,7 @@ export function normalizeAlarmExtractionResult(
 
   return {
     ...extraction,
-    confidence:
-      missingFields.length > 0 && extraction.confidence === "high"
-        ? "medium"
-        : extraction.confidence,
+    confidence: missingFields.length > 0 ? "low" : extraction.confidence,
     missingFields
   };
 }
