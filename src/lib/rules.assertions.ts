@@ -5,6 +5,7 @@ import {
 import { evaluateDecisionAlignment } from "./decisionAlignment";
 import {
   computeMissingAlarmExtractionFields,
+  findAlarmExtractionConflicts,
   findConflictedAlarmExtractionFields,
   mapAlarmExtractionDraftToFields,
   mapAlarmExtractionToDraft,
@@ -39,7 +40,8 @@ export function runRuleAssertions() {
     shortNote: "Appeared during morning ramp-up after overnight rain.",
     confidence: "high",
     missingFields: [],
-    evidence: []
+    evidence: [],
+    conflicts: []
   });
   assert(
     alarmExtractionDraft.alarmTextCode ===
@@ -59,7 +61,8 @@ export function runRuleAssertions() {
       shortNote: null,
       confidence: "high",
       missingFields: [],
-      evidence: []
+      evidence: [],
+      conflicts: []
     }).alarmTextCode === "Fault code 39 — Low System Insulation Resistance",
     "alarm extraction does not duplicate an existing fault code"
   );
@@ -79,7 +82,8 @@ export function runRuleAssertions() {
     shortNote: "Appeared during morning ramp-up after overnight rain.",
     confidence: "high",
     missingFields: ["assetDevice"],
-    evidence: []
+    evidence: [],
+    conflicts: []
   });
   assert(
     completeExtraction.missingFields.length === 0 && completeExtraction.confidence === "high",
@@ -97,7 +101,8 @@ export function runRuleAssertions() {
     shortNote: "Appeared during morning ramp-up after overnight rain.",
     confidence: "high",
     missingFields: [],
-    evidence: []
+    evidence: [],
+    conflicts: []
   });
   assert(
     missingTimestampExtraction.timestamp === null &&
@@ -123,7 +128,8 @@ export function runRuleAssertions() {
         field: "alarmTextCode",
         sourceText: "alarm text/code: Fault code 39 — Low System Insulation Resistance"
       }
-    ]
+    ],
+    conflicts: []
   });
   assert(
     missingAssetExtraction.assetDevice === null &&
@@ -152,7 +158,8 @@ export function runRuleAssertions() {
         shortNote: "Appeared during morning ramp-up after overnight rain.",
         confidence,
         missingFields: [],
-        evidence: []
+        evidence: [],
+        conflicts: []
       }).confidence === confidence,
       `complete alarm extraction preserves model ${confidence} confidence`
     );
@@ -169,7 +176,8 @@ export function runRuleAssertions() {
         shortNote: "Appeared during morning ramp-up after overnight rain.",
         confidence,
         missingFields: [],
-        evidence: []
+        evidence: [],
+        conflicts: []
       }).confidence === "low",
       `missing required alarm field forces model ${confidence} confidence to low`
     );
@@ -187,6 +195,7 @@ export function runRuleAssertions() {
   );
   assert(
     oneAssetExtraction.assetDevice === "INV-07 - Sungrow SG350HX string inverter" &&
+      oneAssetExtraction.conflicts.length === 0 &&
       findConflictedAlarmExtractionFields(oneAssetRawInput).length === 0,
     "one labelled asset candidate is not treated as a conflict"
   );
@@ -204,6 +213,7 @@ export function runRuleAssertions() {
   assert(
     repeatedAssetExtraction.assetDevice === "INV-07 - Sungrow SG350HX string inverter" &&
       repeatedAssetExtraction.missingFields.length === 0 &&
+      repeatedAssetExtraction.conflicts.length === 0 &&
       findConflictedAlarmExtractionFields(repeatedAssetRawInput).length === 0,
     "repeated identical labelled asset candidates are not treated as ambiguity"
   );
@@ -245,9 +255,27 @@ export function runRuleAssertions() {
       conflictingAssetExtraction.missingFields.length === 1 &&
       conflictingAssetExtraction.missingFields[0] === "assetDevice" &&
       conflictingAssetExtraction.confidence === "low" &&
+      conflictingAssetExtraction.conflicts.length === 1 &&
+      conflictingAssetExtraction.conflicts[0].field === "assetDevice" &&
+      conflictingAssetExtraction.conflicts[0].candidates.length === 2 &&
+      conflictingAssetExtraction.conflicts[0].candidates[0].value ===
+        "INV-07 - Sungrow SG350HX string inverter" &&
+      conflictingAssetExtraction.conflicts[0].candidates[0].sourceText ===
+        "asset/device: INV-07 - Sungrow SG350HX string inverter" &&
+      conflictingAssetExtraction.conflicts[0].candidates[1].value ===
+        "INV-08 - Sungrow SG350HX string inverter" &&
+      conflictingAssetExtraction.conflicts[0].candidates[1].sourceText ===
+        "asset/device: INV-08 - Sungrow SG350HX string inverter" &&
       !conflictingAssetExtraction.evidence.some((evidence) => evidence.field === "assetDevice") &&
       evidenceIsExactSourceText(conflictingAssetExtraction, conflictingAssetRawInput),
     "conflicting labelled asset candidates are nulled, missing, low-confidence, and not evidenced"
+  );
+  assert(
+    !String(conflictingAssetExtraction.assetDevice).includes(",") &&
+      conflictingAssetExtraction.conflicts[0].candidates.every((candidate) =>
+        conflictingAssetRawInput.includes(candidate.sourceText)
+      ),
+    "conflicting asset candidates are not concatenated and keep exact source provenance"
   );
   const ar005RawInput = [
     "site/plant: Sierra Verde Solar PV",
@@ -309,9 +337,37 @@ export function runRuleAssertions() {
       ar005Extraction.confidence === "low" &&
       ar005Extraction.missingFields.length === 1 &&
       ar005Extraction.missingFields[0] === "assetDevice" &&
+      ar005Extraction.conflicts.length === 1 &&
+      ar005Extraction.conflicts[0].field === "assetDevice" &&
+      ar005Extraction.conflicts[0].candidates.map((candidate) => candidate.value).join("|") ===
+        "INV-07 - Sungrow SG350HX string inverter|INV-08 - Sungrow SG350HX string inverter" &&
+      ar005Extraction.conflicts[0].candidates.every((candidate) =>
+        ar005RawInput.includes(candidate.sourceText)
+      ) &&
       !ar005Extraction.evidence.some((evidence) => evidence.field === "assetDevice") &&
       evidenceIsExactSourceText(ar005Extraction, ar005RawInput),
     "AR-005 merged conflicting asset export keeps enrichments but clears unresolved asset"
+  );
+  const multipleConflictRawInput = [
+    "site/plant: Sierra Verde Solar PV",
+    "site/plant: Ridge View Solar PV",
+    "asset/device: INV-07 - Sungrow SG350HX string inverter",
+    "asset/device: INV-08 - Sungrow SG350HX string inverter",
+    "alarm text/code: Fault code 39 - Low System Insulation Resistance",
+    "timestamp: 2026-06-04 08:37 CEST"
+  ].join("\n");
+  const multipleConflictExtraction = normalizeAlarmExtractionResult(baseAlarmExtraction(), {
+    rawInput: multipleConflictRawInput
+  });
+  assert(
+    multipleConflictExtraction.sitePlant === null &&
+      multipleConflictExtraction.assetDevice === null &&
+      multipleConflictExtraction.confidence === "low" &&
+      multipleConflictExtraction.missingFields.includes("sitePlant") &&
+      multipleConflictExtraction.missingFields.includes("assetDevice") &&
+      multipleConflictExtraction.conflicts.length === 2 &&
+      findAlarmExtractionConflicts(multipleConflictRawInput).length === 2,
+    "multiple conflicted required fields are each cleared and reported"
   );
   const injectionRawInput = [
     "site/plant: Sierra Verde Solar PV",
@@ -513,6 +569,7 @@ function baseAlarmExtraction(overrides: Partial<AlarmExtractionResult> = {}): Al
     confidence: "high",
     missingFields: [],
     evidence: [],
+    conflicts: [],
     ...overrides
   };
 }

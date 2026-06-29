@@ -43,6 +43,7 @@ import {
   mapAlarmExtractionToDraft
 } from "@/lib/extraction";
 import type {
+  AlarmExtractionConflict,
   AlarmExtractionDraftFields,
   AlarmExtractionResult,
   ExtractedRecentAlarm,
@@ -144,6 +145,9 @@ export default function Home() {
     useState<AlarmExtractionDraftFields>(emptyAlarmExtractionDraftFields);
   const [extractedConfirmed, setExtractedConfirmed] = useState(false);
   const [alarmExtraction, setAlarmExtraction] = useState<AlarmExtractionResult | null>(null);
+  const [alarmExtractionConflicts, setAlarmExtractionConflicts] = useState<
+    AlarmExtractionConflict[]
+  >([]);
   const [alarmExtractionStatus, setAlarmExtractionStatus] = useState<ExtractionStatus>("Idle");
   const [alarmExtractionWorkflowStatus, setAlarmExtractionWorkflowStatus] =
     useState<ExtractionWorkflowStatus>("not_provided");
@@ -222,6 +226,13 @@ export default function Home() {
 
   const manualValidation = validateAlarmFields(manualFields);
   const extractedValidation = validateAlarmFields(extractedFields);
+  const unresolvedAlarmConflictFields = new Set(
+    alarmExtractionConflicts.map((conflict) => conflict.field)
+  );
+  const genericMissingExtractedFields = extractedValidation.missingFields.filter(
+    (field) => !unresolvedAlarmConflictFields.has(field)
+  );
+  const hasUnresolvedAlarmConflicts = alarmExtractionConflicts.length > 0;
   const extractedAlarmHasFaultCode = hasExtractedAlarmFaultCode(
     alarmExtractionDraft,
     extractedFields
@@ -516,6 +527,7 @@ export default function Home() {
 
   const resetExtractionState = () => {
     setAlarmExtraction(null);
+    setAlarmExtractionConflicts([]);
     setAlarmExtractionStatus("Idle");
     setAlarmExtractionWorkflowStatus("not_provided");
     setAlarmExtractionError("");
@@ -573,6 +585,7 @@ export default function Home() {
 
     setInputMode("manual");
     setAlarmExtraction(null);
+    setAlarmExtractionConflicts([]);
     setAlarmExtractionStatus("Idle");
     setAlarmExtractionWorkflowStatus(
       validateAlarmFields(nextFields).isValid ? "confirmed" : "not_provided"
@@ -597,9 +610,21 @@ export default function Home() {
 
     setAlarmExtractionDraft(nextDraft);
     setExtractedFields(mapAlarmExtractionDraftToFields(nextDraft));
+    if (isAlarmExtractionConflictField(field) && String(value).trim()) {
+      setAlarmExtractionConflicts((current) =>
+        current.filter((conflict) => conflict.field !== field)
+      );
+    }
     setExtractedConfirmed(false);
     setAlarmExtractionWorkflowStatus(getEditedExtractionStatus(alarmExtractionWorkflowStatus));
     resetDownstream();
+  };
+
+  const resolveAlarmExtractionConflict = <K extends AlarmExtractionConflict["field"]>(
+    field: K,
+    value: string
+  ) => {
+    updateAlarmExtractionDraftField(field, value as AlarmExtractionDraftFields[K]);
   };
 
   const updateContext = (
@@ -664,6 +689,7 @@ export default function Home() {
     setAlarmFileName("");
     setInputMode("none");
     setAlarmExtraction(null);
+    setAlarmExtractionConflicts([]);
     setAlarmExtractionStatus("Idle");
     setAlarmExtractionWorkflowStatus(value.trim() ? "raw_provided" : "not_provided");
     setAlarmExtractionError("");
@@ -693,6 +719,7 @@ export default function Home() {
       setExtractedFields(emptyAlarmFields);
       setExtractedConfirmed(false);
       setAlarmExtraction(null);
+      setAlarmExtractionConflicts([]);
       setAlarmExtractionStatus("Idle");
       setAlarmExtractionWorkflowStatus("not_provided");
       setAlarmExtractionError("");
@@ -707,6 +734,7 @@ export default function Home() {
     setAlarmExtractionWorkflowStatus("extracting");
     setAlarmExtractionError("");
     setAlarmExtraction(null);
+    setAlarmExtractionConflicts([]);
     setIsAlarmSourceMappingExpanded(false);
 
     const extractionStart = getTelemetryNow();
@@ -734,6 +762,7 @@ export default function Home() {
       setAlarmExtractionDraft(nextDraft);
       setExtractedFields(mapAlarmExtractionDraftToFields(nextDraft));
       setAlarmExtraction(data);
+      setAlarmExtractionConflicts(data.conflicts);
       setInputMode("extracted");
       setExtractedConfirmed(false);
       setAlarmExtractionStatus("Idle");
@@ -759,6 +788,7 @@ export default function Home() {
       setInputMode("none");
       setExtractedFields(emptyAlarmFields);
       setExtractedConfirmed(false);
+      setAlarmExtractionConflicts([]);
       setAlarmExtractionWorkflowStatus(trimmedInput ? "raw_provided" : "not_provided");
       setAlarmExtractionDraft(emptyAlarmExtractionDraftFields);
       setIsAlarmSourceMappingExpanded(false);
@@ -775,6 +805,7 @@ export default function Home() {
     setExtractedFields(emptyAlarmFields);
     setExtractedConfirmed(false);
     setAlarmExtraction(null);
+    setAlarmExtractionConflicts([]);
     setAlarmExtractionDraft(emptyAlarmExtractionDraftFields);
     setIsAlarmSourceMappingExpanded(false);
     setAlarmExtractionStatus("Idle");
@@ -1072,7 +1103,11 @@ export default function Home() {
   };
 
   const useExtractedAlarm = () => {
-    if (!extractedValidation.isValid || !isExtractionConfirmable(alarmExtractionWorkflowStatus)) {
+    if (
+      !extractedValidation.isValid ||
+      hasUnresolvedAlarmConflicts ||
+      !isExtractionConfirmable(alarmExtractionWorkflowStatus)
+    ) {
       return;
     }
 
@@ -1106,6 +1141,7 @@ export default function Home() {
     setIsAlarmSourceMappingExpanded(false);
     setExtractedConfirmed(false);
     setAlarmExtraction(null);
+    setAlarmExtractionConflicts([]);
     setAlarmExtractionStatus("Idle");
     setAlarmExtractionWorkflowStatus(rawAlarmInput.trim() ? "raw_provided" : "cleared");
     setAlarmExtractionError("");
@@ -1925,7 +1961,7 @@ export default function Home() {
                 />
               </div>
             </div>
-            <MissingFields missingFields={extractedValidation.missingFields} />
+            <MissingFields missingFields={genericMissingExtractedFields} />
             <div className="formGrid manualGrid">
               <AlarmExtractionDraftField
                 label="site/plant"
@@ -1934,12 +1970,26 @@ export default function Home() {
                 missing={!alarmExtractionDraft.sitePlant.trim()}
                 onChange={updateAlarmExtractionDraftField}
               />
+              <AlarmExtractionConflictResolver
+                conflict={alarmExtractionConflicts.find(
+                  (conflict) => conflict.field === "sitePlant"
+                )}
+                label="site/plant"
+                onSelect={resolveAlarmExtractionConflict}
+              />
               <AlarmExtractionDraftField
                 label="asset/device"
                 field="assetDevice"
                 draft={alarmExtractionDraft}
                 missing={!alarmExtractionDraft.assetDevice.trim()}
                 onChange={updateAlarmExtractionDraftField}
+              />
+              <AlarmExtractionConflictResolver
+                conflict={alarmExtractionConflicts.find(
+                  (conflict) => conflict.field === "assetDevice"
+                )}
+                label="asset/device"
+                onSelect={resolveAlarmExtractionConflict}
               />
               <AlarmExtractionDraftField
                 label="alarm text/code"
@@ -1948,12 +1998,26 @@ export default function Home() {
                 missing={!alarmExtractionDraft.alarmTextCode.trim()}
                 onChange={updateAlarmExtractionDraftField}
               />
+              <AlarmExtractionConflictResolver
+                conflict={alarmExtractionConflicts.find(
+                  (conflict) => conflict.field === "alarmTextCode"
+                )}
+                label="alarm text/code"
+                onSelect={resolveAlarmExtractionConflict}
+              />
               <AlarmExtractionDraftField
                 label="timestamp"
                 field="timestamp"
                 draft={alarmExtractionDraft}
                 missing={!alarmExtractionDraft.timestamp.trim()}
                 onChange={updateAlarmExtractionDraftField}
+              />
+              <AlarmExtractionConflictResolver
+                conflict={alarmExtractionConflicts.find(
+                  (conflict) => conflict.field === "timestamp"
+                )}
+                label="timestamp"
+                onSelect={resolveAlarmExtractionConflict}
               />
               <label>
                 <span>Severity</span>
@@ -2013,6 +2077,7 @@ export default function Home() {
                 className="primaryButton"
                 disabled={
                   !extractedValidation.isValid ||
+                  hasUnresolvedAlarmConflicts ||
                   !isExtractionConfirmable(alarmExtractionWorkflowStatus)
                 }
                 onClick={useExtractedAlarm}
@@ -4460,6 +4525,49 @@ function MissingFields({
   );
 }
 
+function AlarmExtractionConflictResolver({
+  conflict,
+  label,
+  onSelect
+}: {
+  conflict: AlarmExtractionConflict | undefined;
+  label: string;
+  onSelect: (field: AlarmExtractionConflict["field"], value: string) => void;
+}) {
+  if (!conflict) {
+    return null;
+  }
+
+  return (
+    <div
+      className="alarmConflictResolver wideField"
+      role="group"
+      aria-label={`Conflicting ${label} values found`}
+    >
+      <div>
+        <strong>Conflicting {label} values found</strong>
+        <p>
+          The pasted source contains more than one value. Select the correct value or enter it
+          manually.
+        </p>
+      </div>
+      <div className="alarmConflictCandidateList">
+        {conflict.candidates.map((candidate) => (
+          <button
+            type="button"
+            className="alarmConflictCandidate"
+            key={`${conflict.field}-${candidate.sourceText}`}
+            onClick={() => onSelect(conflict.field, candidate.value)}
+          >
+            <span>{candidate.value}</span>
+            <small>Source: {candidate.sourceText}</small>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AlarmExtractionDraftField({
   label,
   field,
@@ -4505,6 +4613,19 @@ function EditableField({
       </span>
       <input value={value} onChange={(event) => onChange(event.target.value)} />
     </label>
+  );
+}
+
+function isAlarmExtractionConflictField(
+  field: keyof AlarmExtractionDraftFields
+): field is AlarmExtractionConflict["field"] {
+  return (
+    field === "sitePlant" ||
+    field === "assetDevice" ||
+    field === "alarmTextCode" ||
+    field === "timestamp" ||
+    field === "severity" ||
+    field === "shortNote"
   );
 }
 
