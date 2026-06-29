@@ -36,6 +36,39 @@ export const requiredAlarmExtractionFields: AlarmExtractionRequiredField[] = [
   ...requiredAlarmFields
 ];
 
+type AlarmExtractionNormalizationOptions = {
+  rawInput?: string;
+  requiredFields?: readonly AlarmExtractionRequiredField[];
+};
+
+const alarmExtractionLabelAliases: Record<AlarmExtractionRequiredField, string[]> = {
+  sitePlant: ["site/plant", "site", "plant", "site name", "plant name"],
+  assetDevice: [
+    "asset/device",
+    "asset",
+    "device",
+    "equipment",
+    "inverter",
+    "combiner",
+    "string",
+    "meter",
+    "tracker"
+  ],
+  alarmTextCode: [
+    "alarm text/code",
+    "alarm",
+    "alarm text",
+    "alarm code",
+    "code",
+    "fault code",
+    "message",
+    "raw message"
+  ],
+  timestamp: ["timestamp", "time", "date/time", "datetime", "started at", "start time", "date"],
+  severity: ["severity", "priority"],
+  shortNote: ["short note", "note", "notes", "operator note", "description"]
+};
+
 export type AlarmExtractionDraftFields = {
   sitePlant: string;
   assetDevice: string;
@@ -153,12 +186,21 @@ export function mapAlarmExtractionDraftToFields(
 
 export function normalizeAlarmExtractionResult(
   extraction: AlarmExtractionResult,
-  requiredFields: readonly AlarmExtractionRequiredField[] = requiredAlarmExtractionFields
+  options: AlarmExtractionNormalizationOptions = {}
 ): AlarmExtractionResult {
-  const missingFields = computeMissingAlarmExtractionFields(extraction, requiredFields);
+  const requiredFields = options.requiredFields ?? requiredAlarmExtractionFields;
+  const conflictedFields = options.rawInput
+    ? findConflictedAlarmExtractionFields(options.rawInput, requiredFields)
+    : [];
+  const conflictGuardedExtraction =
+    conflictedFields.length > 0 ? clearConflictedExtractionFields(extraction, conflictedFields) : extraction;
+  const evidenceFilteredExtraction = options.rawInput
+    ? filterAlarmExtractionEvidence(conflictGuardedExtraction, options.rawInput, conflictedFields)
+    : conflictGuardedExtraction;
+  const missingFields = computeMissingAlarmExtractionFields(evidenceFilteredExtraction, requiredFields);
 
   return {
-    ...extraction,
+    ...evidenceFilteredExtraction,
     confidence: missingFields.length > 0 ? "low" : extraction.confidence,
     missingFields
   };
@@ -192,6 +234,108 @@ export function formatAlarmTextCodeWithFaultCode(alarmTextCode: string, faultCod
 
 function hasRequiredExtractionValue(value: string | null | undefined) {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+export function findConflictedAlarmExtractionFields(
+  rawInput: string,
+  requiredFields: readonly AlarmExtractionRequiredField[] = requiredAlarmExtractionFields
+): AlarmExtractionRequiredField[] {
+  const candidatesByField = getLabelledAlarmExtractionCandidates(rawInput, requiredFields);
+
+  return requiredFields.filter((field) => {
+    const candidates = candidatesByField.get(field) ?? [];
+    const uniqueCandidates = new Set(candidates.map((candidate) => normalizeCandidateValue(candidate)));
+
+    return uniqueCandidates.size > 1;
+  });
+}
+
+function getLabelledAlarmExtractionCandidates(
+  rawInput: string,
+  trackedFields: readonly AlarmExtractionRequiredField[]
+) {
+  const trackedFieldSet = new Set(trackedFields);
+  const candidatesByField = new Map<AlarmExtractionRequiredField, string[]>();
+
+  rawInput.split(/\r?\n/).forEach((line) => {
+    const match = line.match(/^\s*([^:|=,]+)\s*[:|=,]\s*(.+?)\s*$/);
+
+    if (!match) {
+      return;
+    }
+
+    const field = getAlarmExtractionFieldFromLabel(match[1]);
+    const value = match[2].trim();
+
+    if (!field || !trackedFieldSet.has(field) || !value) {
+      return;
+    }
+
+    candidatesByField.set(field, [...(candidatesByField.get(field) ?? []), value]);
+  });
+
+  return candidatesByField;
+}
+
+function clearConflictedExtractionFields(
+  extraction: AlarmExtractionResult,
+  conflictedFields: readonly AlarmExtractionRequiredField[]
+) {
+  const nextExtraction = { ...extraction };
+
+  conflictedFields.forEach((field) => {
+    nextExtraction[field] = null;
+  });
+
+  return nextExtraction;
+}
+
+function filterAlarmExtractionEvidence(
+  extraction: AlarmExtractionResult,
+  rawInput: string,
+  conflictedFields: readonly AlarmExtractionRequiredField[]
+): AlarmExtractionResult {
+  const conflictedFieldSet = new Set(conflictedFields);
+
+  return {
+    ...extraction,
+    evidence: extraction.evidence.filter((evidence) => {
+      const field = getAlarmExtractionFieldFromLabel(evidence.field);
+
+      return (
+        (!field || !conflictedFieldSet.has(field)) &&
+        Boolean(evidence.sourceText) &&
+        rawInput.includes(evidence.sourceText)
+      );
+    })
+  };
+}
+
+function getAlarmExtractionFieldFromLabel(label: string): AlarmExtractionRequiredField | null {
+  const normalizedLabel = normalizeLabel(label);
+
+  for (const [field, aliases] of Object.entries(alarmExtractionLabelAliases) as Array<
+    [AlarmExtractionRequiredField, string[]]
+  >) {
+    if (aliases.some((alias) => normalizeLabel(alias) === normalizedLabel)) {
+      return field;
+    }
+  }
+
+  return null;
+}
+
+function normalizeLabel(value: string) {
+  return value
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeCandidateValue(value: string) {
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 function alarmTextContainsFaultCode(alarmText: string, faultCode: string) {

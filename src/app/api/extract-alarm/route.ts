@@ -116,7 +116,7 @@ export async function POST(request: Request) {
       throw new Error("OpenAI response did not match the expected alarm extraction schema.");
     }
 
-    return NextResponse.json(normalizeAlarmExtractionResult(parsed));
+    return NextResponse.json(normalizeAlarmExtractionResult(parsed, { rawInput: payload.rawText }));
   } catch (error) {
     if (error instanceof OpenAiResponseError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
