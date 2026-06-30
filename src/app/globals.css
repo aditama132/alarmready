@@ -406,6 +406,11 @@ button svg {
   margin: 3px 0 0;
 }
 
+.alarmConflictResolver:focus {
+  outline: 3px solid rgba(180, 125, 30, 0.24);
+  outline-offset: 3px;
+}
+
 .alarmConflictCandidateList {
   display: grid;
   gap: 8px;
@@ -439,6 +444,29 @@ button svg {
   color: var(--muted);
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+.inlineConflictNotice {
+  align-items: center;
+  background: #fffaf0;
+  border: 1px solid #e4c887;
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 12px;
+  padding: 8px 10px;
+}
+
+.inlineConflictNotice p {
+  color: #623b08;
+  font-size: 0.85rem;
+  font-weight: 800;
+  margin: 0;
+}
+
+.inlineConflictNotice .inlineTextButton {
+  margin-left: 0;
 }
 
 button:disabled {

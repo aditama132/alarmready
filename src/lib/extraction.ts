@@ -50,6 +50,15 @@ export const requiredAlarmExtractionFields: AlarmExtractionRequiredField[] = [
   ...requiredAlarmFields
 ];
 
+export const alarmExtractionConflictFieldOrder: AlarmExtractionRequiredField[] = [
+  "sitePlant",
+  "assetDevice",
+  "alarmTextCode",
+  "timestamp",
+  "severity",
+  "shortNote"
+];
+
 type AlarmExtractionNormalizationOptions = {
   rawInput?: string;
   requiredFields?: readonly AlarmExtractionRequiredField[];
@@ -277,6 +286,29 @@ export function findAlarmExtractionConflicts(
 
     return uniqueCandidates.length > 1 ? [{ field, candidates: uniqueCandidates }] : [];
   });
+}
+
+export function getFirstAlarmExtractionConflict(
+  conflicts: readonly AlarmExtractionConflict[]
+): AlarmExtractionConflict | undefined {
+  return alarmExtractionConflictFieldOrder
+    .map((field) => conflicts.find((conflict) => conflict.field === field))
+    .find((conflict): conflict is AlarmExtractionConflict => Boolean(conflict));
+}
+
+export function getAlarmExtractionConflictElementId(field: AlarmExtractionRequiredField) {
+  return `alarm-extraction-conflict-${field}`;
+}
+
+export function getAlarmExtractionConflictNoticeCopy(conflictCount: number) {
+  const normalizedCount = Math.max(0, conflictCount);
+
+  return {
+    message: `Resolve ${normalizedCount} conflicting ${
+      normalizedCount === 1 ? "field" : "fields"
+    } above to continue.`,
+    actionLabel: normalizedCount === 1 ? "Review conflict" : "Review conflicts"
+  };
 }
 
 function getLabelledAlarmExtractionCandidates(

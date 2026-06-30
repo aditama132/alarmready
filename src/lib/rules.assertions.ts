@@ -7,6 +7,9 @@ import {
   computeMissingAlarmExtractionFields,
   findAlarmExtractionConflicts,
   findConflictedAlarmExtractionFields,
+  getAlarmExtractionConflictElementId,
+  getAlarmExtractionConflictNoticeCopy,
+  getFirstAlarmExtractionConflict,
   mapAlarmExtractionDraftToFields,
   mapAlarmExtractionToDraft,
   normalizeAlarmExtractionResult
@@ -368,6 +371,48 @@ export function runRuleAssertions() {
       multipleConflictExtraction.conflicts.length === 2 &&
       findAlarmExtractionConflicts(multipleConflictRawInput).length === 2,
     "multiple conflicted required fields are each cleared and reported"
+  );
+  assert(
+    getAlarmExtractionConflictNoticeCopy(1).message ===
+      "Resolve 1 conflicting field above to continue." &&
+      getAlarmExtractionConflictNoticeCopy(1).actionLabel === "Review conflict" &&
+      getAlarmExtractionConflictNoticeCopy(2).message ===
+        "Resolve 2 conflicting fields above to continue." &&
+      getAlarmExtractionConflictNoticeCopy(2).actionLabel === "Review conflicts",
+    "conflict confirmation blocker copy uses singular and plural wording"
+  );
+  assert(
+    getFirstAlarmExtractionConflict([
+      {
+        field: "timestamp",
+        candidates: [
+          {
+            value: "2026-06-04 08:37 CEST",
+            sourceText: "timestamp: 2026-06-04 08:37 CEST"
+          },
+          {
+            value: "2026-06-05 08:37 CEST",
+            sourceText: "timestamp: 2026-06-05 08:37 CEST"
+          }
+        ]
+      },
+      {
+        field: "assetDevice",
+        candidates: [
+          {
+            value: "INV-07",
+            sourceText: "asset/device: INV-07"
+          },
+          {
+            value: "INV-08",
+            sourceText: "asset/device: INV-08"
+          }
+        ]
+      }
+    ])?.field === "assetDevice" &&
+      getAlarmExtractionConflictElementId("assetDevice") ===
+        "alarm-extraction-conflict-assetDevice",
+    "conflict review targets the first unresolved field in form order"
   );
   const injectionRawInput = [
     "site/plant: Sierra Verde Solar PV",

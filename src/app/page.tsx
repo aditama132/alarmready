@@ -35,6 +35,9 @@ import {
   emptyAlarmExtractionDraftFields,
   formatExtractedRecentAlarms,
   formatExtractedWorkRecords,
+  getAlarmExtractionConflictElementId,
+  getAlarmExtractionConflictNoticeCopy,
+  getFirstAlarmExtractionConflict,
   isAlarmExtractionResult,
   isOperatingContextExtractionResult,
   isRecentAlarmExtractionResult,
@@ -232,7 +235,11 @@ export default function Home() {
   const genericMissingExtractedFields = extractedValidation.missingFields.filter(
     (field) => !unresolvedAlarmConflictFields.has(field)
   );
-  const hasUnresolvedAlarmConflicts = alarmExtractionConflicts.length > 0;
+  const unresolvedAlarmConflictCount = alarmExtractionConflicts.length;
+  const hasUnresolvedAlarmConflicts = unresolvedAlarmConflictCount > 0;
+  const alarmConflictNoticeCopy = getAlarmExtractionConflictNoticeCopy(
+    unresolvedAlarmConflictCount
+  );
   const extractedAlarmHasFaultCode = hasExtractedAlarmFaultCode(
     alarmExtractionDraft,
     extractedFields
@@ -1726,6 +1733,24 @@ export default function Home() {
     }
   };
 
+  const focusFirstAlarmExtractionConflict = () => {
+    const firstConflict = getFirstAlarmExtractionConflict(alarmExtractionConflicts);
+
+    if (!firstConflict) {
+      return;
+    }
+
+    const element = document.getElementById(
+      getAlarmExtractionConflictElementId(firstConflict.field)
+    );
+
+    element?.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    if (element instanceof HTMLElement) {
+      element.focus();
+    }
+  };
+
   const updateSelectedDecision = (selectedDecision: TriageDecision | "") => {
     const decisionChanged = selectedDecision !== decisionState.selectedDecision;
     const hasPreservedNote = decisionState.validationNote.trim().length > 0;
@@ -2071,10 +2096,29 @@ export default function Home() {
                 </dl>
               ) : null}
             </div>
+            {hasUnresolvedAlarmConflicts ? (
+              <div
+                className="inlineConflictNotice"
+                id="alarm-conflict-confirm-blocker"
+                role="status"
+              >
+                <p>{alarmConflictNoticeCopy.message}</p>
+                <button
+                  type="button"
+                  className="inlineTextButton"
+                  onClick={focusFirstAlarmExtractionConflict}
+                >
+                  {alarmConflictNoticeCopy.actionLabel}
+                </button>
+              </div>
+            ) : null}
             <div className="buttonRow extractionActions">
               <button
                 type="button"
                 className="primaryButton"
+                aria-describedby={
+                  hasUnresolvedAlarmConflicts ? "alarm-conflict-confirm-blocker" : undefined
+                }
                 disabled={
                   !extractedValidation.isValid ||
                   hasUnresolvedAlarmConflicts ||
@@ -4541,7 +4585,9 @@ function AlarmExtractionConflictResolver({
   return (
     <div
       className="alarmConflictResolver wideField"
+      id={getAlarmExtractionConflictElementId(conflict.field)}
       role="group"
+      tabIndex={-1}
       aria-label={`Conflicting ${label} values found`}
     >
       <div>
