@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { isAlarmExtractionResult, normalizeAlarmExtractionResult } from "@/lib/extraction";
+import { alarmExtractionInstructions } from "@/lib/alarmExtractionPrompt";
+import {
+  conflictEligibleAlarmExtractionFields,
+  isAlarmExtractionResult,
+  normalizeAlarmExtractionResult
+} from "@/lib/extraction";
 import {
   OpenAiResponseError,
   isRecord,
@@ -51,7 +56,7 @@ const alarmExtractionSchema = {
         properties: {
           field: {
             type: "string",
-            enum: ["sitePlant", "assetDevice", "alarmTextCode", "timestamp"]
+            enum: conflictEligibleAlarmExtractionFields
           },
           candidates: {
             type: "array",
@@ -86,19 +91,6 @@ const alarmExtractionSchema = {
     "conflicts"
   ]
 } as const;
-
-const alarmExtractionInstructions = [
-  "You extract structured fields from messy solar monitoring alarm exports for AlarmReady.",
-  "Return only JSON matching the schema.",
-  "Extract only values that are present in the provided text.",
-  "Do not infer root cause, diagnose, or explain the alarm.",
-  "Do not invent site, asset, severity, timestamp, manufacturer, model, or fault code.",
-  "If a value is uncertain, use null when appropriate and lower confidence.",
-  "Preserve short source evidence for extracted fields. Evidence snippets must be concise.",
-  "Return conflicts as an empty array. AlarmReady recomputes unresolved duplicate values server-side.",
-  "Fault code 39 should be extracted as faultCode 39 if present, but do not explain or diagnose it.",
-  "missingFields should include missing required AlarmReady fields: sitePlant, assetDevice, alarmTextCode, timestamp."
-].join(" ");
 
 export async function POST(request: Request) {
   let apiKey: string;

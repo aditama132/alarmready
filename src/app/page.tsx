@@ -46,6 +46,7 @@ import {
   isWorkRecordExtractionResult,
   mapAlarmExtractionDraftToFields,
   mapAlarmExtractionToDraft,
+  normalizeExtractedSeverity,
   shouldShowAlarmExtractionMissingState
 } from "@/lib/extraction";
 import type {
@@ -639,7 +640,9 @@ export default function Home() {
     field: K,
     value: string
   ) => {
-    updateAlarmExtractionDraftField(field, value as AlarmExtractionDraftFields[K]);
+    const resolvedValue = field === "severity" ? normalizeExtractedSeverity(value) : value;
+
+    updateAlarmExtractionDraftField(field, resolvedValue as AlarmExtractionDraftFields[K]);
     window.requestAnimationFrame(() => {
       focusAlarmExtractionField(field, { scroll: false });
     });
@@ -2123,6 +2126,16 @@ export default function Home() {
                   <option>Critical</option>
                 </select>
               </label>
+              <AlarmExtractionConflictResolver
+                conflict={alarmExtractionConflicts.find(
+                  (conflict) => conflict.field === "severity"
+                )}
+                label={getAlarmFieldDisplayLabel("severity")}
+                manualEntryCopy="Select the value that best matches the source, or choose a different value in the Severity field."
+                manualEntryActionLabel="Choose a different value"
+                onManualEntry={focusAlarmExtractionField}
+                onSelect={resolveAlarmExtractionConflict}
+              />
               <AlarmExtractionDraftField
                 label="short note"
                 field="shortNote"
@@ -4637,11 +4650,15 @@ function MissingFields({
 function AlarmExtractionConflictResolver({
   conflict,
   label,
+  manualEntryActionLabel = "Enter a different value",
+  manualEntryCopy,
   onManualEntry,
   onSelect
 }: {
   conflict: AlarmExtractionConflict | undefined;
   label: string;
+  manualEntryActionLabel?: string;
+  manualEntryCopy?: string;
   onManualEntry: (field: AlarmExtractionConflict["field"]) => void;
   onSelect: (field: AlarmExtractionConflict["field"], value: string) => void;
 }) {
@@ -4662,13 +4679,13 @@ function AlarmExtractionConflictResolver({
     >
       <div>
         <strong>Conflicting {label} values found</strong>
-        <p id={descriptionId}>{getAlarmExtractionManualEntryCopy(label)}</p>
+        <p id={descriptionId}>{manualEntryCopy ?? getAlarmExtractionManualEntryCopy(label)}</p>
         <button
           type="button"
           className="inlineTextButton alarmConflictManualEntryButton"
           onClick={() => onManualEntry(conflict.field)}
         >
-          Enter a different value
+          {manualEntryActionLabel}
         </button>
       </div>
       <div className="alarmConflictCandidateList">
@@ -4749,8 +4766,7 @@ function isAlarmExtractionConflictField(
     field === "assetDevice" ||
     field === "alarmTextCode" ||
     field === "timestamp" ||
-    field === "severity" ||
-    field === "shortNote"
+    field === "severity"
   );
 }
 
