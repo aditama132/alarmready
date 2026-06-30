@@ -12,6 +12,24 @@ export type ExtractionEvidence = {
   sourceText: string;
 };
 
+export type AlarmExtractionRequiredField =
+  | "sitePlant"
+  | "assetDevice"
+  | "alarmTextCode"
+  | "timestamp"
+  | "severity"
+  | "shortNote";
+
+export type AlarmExtractionConflictCandidate = {
+  value: string;
+  sourceText: string;
+};
+
+export type AlarmExtractionConflict = {
+  field: AlarmExtractionRequiredField;
+  candidates: AlarmExtractionConflictCandidate[];
+};
+
 export type AlarmExtractionResult = {
   sitePlant: string | null;
   assetDevice: string | null;
@@ -25,16 +43,54 @@ export type AlarmExtractionResult = {
   confidence: ExtractionConfidence;
   missingFields: string[];
   evidence: ExtractionEvidence[];
+  conflicts: AlarmExtractionConflict[];
 };
-
-export type AlarmExtractionRequiredField = keyof Pick<
-  AlarmExtractionResult,
-  "sitePlant" | "assetDevice" | "alarmTextCode" | "timestamp" | "severity" | "shortNote"
->;
 
 export const requiredAlarmExtractionFields: AlarmExtractionRequiredField[] = [
   ...requiredAlarmFields
 ];
+
+export const alarmExtractionConflictFieldOrder: AlarmExtractionRequiredField[] = [
+  "sitePlant",
+  "assetDevice",
+  "alarmTextCode",
+  "timestamp",
+  "severity",
+  "shortNote"
+];
+
+type AlarmExtractionNormalizationOptions = {
+  rawInput?: string;
+  requiredFields?: readonly AlarmExtractionRequiredField[];
+};
+
+const alarmExtractionLabelAliases: Record<AlarmExtractionRequiredField, string[]> = {
+  sitePlant: ["site/plant", "site", "plant", "site name", "plant name"],
+  assetDevice: [
+    "asset/device",
+    "asset",
+    "device",
+    "equipment",
+    "inverter",
+    "combiner",
+    "string",
+    "meter",
+    "tracker"
+  ],
+  alarmTextCode: [
+    "alarm text/code",
+    "alarm",
+    "alarm text",
+    "alarm code",
+    "code",
+    "fault code",
+    "message",
+    "raw message"
+  ],
+  timestamp: ["timestamp", "time", "date/time", "datetime", "started at", "start time", "date"],
+  severity: ["severity", "priority"],
+  shortNote: ["short note", "note", "notes", "operator note", "description"]
+};
 
 export type AlarmExtractionDraftFields = {
   sitePlant: string;
@@ -120,7 +176,7 @@ export const emptyAlarmExtractionDraftFields: AlarmExtractionDraftFields = {
 export function mapAlarmExtractionToDraft(
   extraction: AlarmExtractionResult
 ): AlarmExtractionDraftFields {
-  return {
+  const draft: AlarmExtractionDraftFields = {
     sitePlant: cleanNullable(extraction.sitePlant),
     assetDevice: cleanNullable(extraction.assetDevice),
     manufacturer: cleanNullable(extraction.manufacturer),
@@ -135,6 +191,12 @@ export function mapAlarmExtractionToDraft(
     shortNote: cleanNullable(extraction.shortNote),
     confidence: extraction.confidence
   };
+
+  extraction.conflicts.forEach((conflict) => {
+    draft[conflict.field] = "";
+  });
+
+  return draft;
 }
 
 export function mapAlarmExtractionDraftToFields(
@@ -153,14 +215,25 @@ export function mapAlarmExtractionDraftToFields(
 
 export function normalizeAlarmExtractionResult(
   extraction: AlarmExtractionResult,
-  requiredFields: readonly AlarmExtractionRequiredField[] = requiredAlarmExtractionFields
+  options: AlarmExtractionNormalizationOptions = {}
 ): AlarmExtractionResult {
-  const missingFields = computeMissingAlarmExtractionFields(extraction, requiredFields);
+  const requiredFields = options.requiredFields ?? requiredAlarmExtractionFields;
+  const conflicts = options.rawInput
+    ? findAlarmExtractionConflicts(options.rawInput, requiredFields)
+    : extraction.conflicts;
+  const conflictedFields = conflicts.map((conflict) => conflict.field);
+  const conflictGuardedExtraction =
+    conflictedFields.length > 0 ? clearConflictedExtractionFields(extraction, conflictedFields) : extraction;
+  const evidenceFilteredExtraction = options.rawInput
+    ? filterAlarmExtractionEvidence(conflictGuardedExtraction, options.rawInput, conflictedFields)
+    : conflictGuardedExtraction;
+  const missingFields = computeMissingAlarmExtractionFields(evidenceFilteredExtraction, requiredFields);
 
   return {
-    ...extraction,
+    ...evidenceFilteredExtraction,
     confidence: missingFields.length > 0 ? "low" : extraction.confidence,
-    missingFields
+    missingFields,
+    conflicts
   };
 }
 
@@ -192,6 +265,179 @@ export function formatAlarmTextCodeWithFaultCode(alarmTextCode: string, faultCod
 
 function hasRequiredExtractionValue(value: string | null | undefined) {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+export function findConflictedAlarmExtractionFields(
+  rawInput: string,
+  requiredFields: readonly AlarmExtractionRequiredField[] = requiredAlarmExtractionFields
+): AlarmExtractionRequiredField[] {
+  return findAlarmExtractionConflicts(rawInput, requiredFields).map((conflict) => conflict.field);
+}
+
+export function findAlarmExtractionConflicts(
+  rawInput: string,
+  requiredFields: readonly AlarmExtractionRequiredField[] = requiredAlarmExtractionFields
+): AlarmExtractionConflict[] {
+  const candidatesByField = getLabelledAlarmExtractionCandidates(rawInput, requiredFields);
+
+  return requiredFields.flatMap((field) => {
+    const candidates = candidatesByField.get(field) ?? [];
+    const uniqueCandidates = dedupeAlarmExtractionConflictCandidates(candidates);
+
+    return uniqueCandidates.length > 1 ? [{ field, candidates: uniqueCandidates }] : [];
+  });
+}
+
+export function getFirstAlarmExtractionConflict(
+  conflicts: readonly AlarmExtractionConflict[]
+): AlarmExtractionConflict | undefined {
+  return alarmExtractionConflictFieldOrder
+    .map((field) => conflicts.find((conflict) => conflict.field === field))
+    .find((conflict): conflict is AlarmExtractionConflict => Boolean(conflict));
+}
+
+export function getAlarmExtractionConflictElementId(field: AlarmExtractionRequiredField) {
+  return `alarm-extraction-conflict-${field}`;
+}
+
+export function getAlarmExtractionFieldInputId(field: AlarmExtractionRequiredField) {
+  return `alarm-extraction-field-${field}`;
+}
+
+export function getAlarmExtractionConflictNoticeCopy(conflictCount: number) {
+  const normalizedCount = Math.max(0, conflictCount);
+
+  return {
+    message: `Resolve ${normalizedCount} conflicting ${
+      normalizedCount === 1 ? "field" : "fields"
+    } above to continue.`,
+    actionLabel: normalizedCount === 1 ? "Review conflict" : "Review conflicts"
+  };
+}
+
+export function getAlarmExtractionManualEntryCopy(fieldLabel: string) {
+  return `Select the correct value below, or type a different value in the ${fieldLabel} field above.`;
+}
+
+export function shouldShowAlarmExtractionMissingState(
+  value: string,
+  hasUnresolvedConflict: boolean
+) {
+  return !value.trim() && !hasUnresolvedConflict;
+}
+
+function getLabelledAlarmExtractionCandidates(
+  rawInput: string,
+  trackedFields: readonly AlarmExtractionRequiredField[]
+) {
+  const trackedFieldSet = new Set(trackedFields);
+  const candidatesByField = new Map<AlarmExtractionRequiredField, AlarmExtractionConflictCandidate[]>();
+
+  rawInput.split(/\r?\n/).forEach((line) => {
+    const match = line.match(/^\s*([^:|=,]+)\s*[:|=,]\s*(.+?)\s*$/);
+
+    if (!match) {
+      return;
+    }
+
+    const field = getAlarmExtractionFieldFromLabel(match[1]);
+    const value = match[2].trim();
+
+    if (!field || !trackedFieldSet.has(field) || !value) {
+      return;
+    }
+
+    candidatesByField.set(field, [
+      ...(candidatesByField.get(field) ?? []),
+      {
+        value,
+        sourceText: line.trim()
+      }
+    ]);
+  });
+
+  return candidatesByField;
+}
+
+function dedupeAlarmExtractionConflictCandidates(
+  candidates: AlarmExtractionConflictCandidate[]
+): AlarmExtractionConflictCandidate[] {
+  const seenValues = new Set<string>();
+  const uniqueCandidates: AlarmExtractionConflictCandidate[] = [];
+
+  candidates.forEach((candidate) => {
+    const normalizedValue = normalizeCandidateValue(candidate.value);
+
+    if (seenValues.has(normalizedValue)) {
+      return;
+    }
+
+    seenValues.add(normalizedValue);
+    uniqueCandidates.push(candidate);
+  });
+
+  return uniqueCandidates;
+}
+
+function clearConflictedExtractionFields(
+  extraction: AlarmExtractionResult,
+  conflictedFields: readonly AlarmExtractionRequiredField[]
+) {
+  const nextExtraction = { ...extraction };
+
+  conflictedFields.forEach((field) => {
+    nextExtraction[field] = null;
+  });
+
+  return nextExtraction;
+}
+
+function filterAlarmExtractionEvidence(
+  extraction: AlarmExtractionResult,
+  rawInput: string,
+  conflictedFields: readonly AlarmExtractionRequiredField[]
+): AlarmExtractionResult {
+  const conflictedFieldSet = new Set(conflictedFields);
+
+  return {
+    ...extraction,
+    evidence: extraction.evidence.filter((evidence) => {
+      const field = getAlarmExtractionFieldFromLabel(evidence.field);
+
+      return (
+        (!field || !conflictedFieldSet.has(field)) &&
+        Boolean(evidence.sourceText) &&
+        rawInput.includes(evidence.sourceText)
+      );
+    })
+  };
+}
+
+function getAlarmExtractionFieldFromLabel(label: string): AlarmExtractionRequiredField | null {
+  const normalizedLabel = normalizeLabel(label);
+
+  for (const [field, aliases] of Object.entries(alarmExtractionLabelAliases) as Array<
+    [AlarmExtractionRequiredField, string[]]
+  >) {
+    if (aliases.some((alias) => normalizeLabel(alias) === normalizedLabel)) {
+      return field;
+    }
+  }
+
+  return null;
+}
+
+function normalizeLabel(value: string) {
+  return value
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeCandidateValue(value: string) {
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 function alarmTextContainsFaultCode(alarmText: string, faultCode: string) {
@@ -293,7 +539,9 @@ export function isAlarmExtractionResult(value: unknown): value is AlarmExtractio
     isConfidence(value.confidence) &&
     isStringArray(value.missingFields) &&
     Array.isArray(value.evidence) &&
-    value.evidence.every(isExtractionEvidence)
+    value.evidence.every(isExtractionEvidence) &&
+    Array.isArray(value.conflicts) &&
+    value.conflicts.every(isAlarmExtractionConflict)
   );
 }
 
@@ -441,6 +689,32 @@ function isExtractedRecentAlarm(value: unknown): value is ExtractedRecentAlarm {
 
 function isExtractionEvidence(value: unknown): value is ExtractionEvidence {
   return isRecord(value) && typeof value.field === "string" && typeof value.sourceText === "string";
+}
+
+function isAlarmExtractionConflict(value: unknown): value is AlarmExtractionConflict {
+  return (
+    isRecord(value) &&
+    isAlarmExtractionRequiredField(value.field) &&
+    Array.isArray(value.candidates) &&
+    value.candidates.every(isAlarmExtractionConflictCandidate)
+  );
+}
+
+function isAlarmExtractionConflictCandidate(
+  value: unknown
+): value is AlarmExtractionConflictCandidate {
+  return (
+    isRecord(value) &&
+    typeof value.value === "string" &&
+    typeof value.sourceText === "string"
+  );
+}
+
+function isAlarmExtractionRequiredField(value: unknown): value is AlarmExtractionRequiredField {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(alarmExtractionLabelAliases, value)
+  );
 }
 
 function isNullableString(value: unknown): value is string | null {

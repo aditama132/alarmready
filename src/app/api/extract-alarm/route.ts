@@ -42,6 +42,32 @@ const alarmExtractionSchema = {
         },
         required: ["field", "sourceText"]
       }
+    },
+    conflicts: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          field: {
+            type: "string",
+            enum: ["sitePlant", "assetDevice", "alarmTextCode", "timestamp"]
+          },
+          candidates: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                value: { type: "string" },
+                sourceText: { type: "string" }
+              },
+              required: ["value", "sourceText"]
+            }
+          }
+        },
+        required: ["field", "candidates"]
+      }
     }
   },
   required: [
@@ -56,7 +82,8 @@ const alarmExtractionSchema = {
     "shortNote",
     "confidence",
     "missingFields",
-    "evidence"
+    "evidence",
+    "conflicts"
   ]
 } as const;
 
@@ -68,6 +95,7 @@ const alarmExtractionInstructions = [
   "Do not invent site, asset, severity, timestamp, manufacturer, model, or fault code.",
   "If a value is uncertain, use null when appropriate and lower confidence.",
   "Preserve short source evidence for extracted fields. Evidence snippets must be concise.",
+  "Return conflicts as an empty array. AlarmReady recomputes unresolved duplicate values server-side.",
   "Fault code 39 should be extracted as faultCode 39 if present, but do not explain or diagnose it.",
   "missingFields should include missing required AlarmReady fields: sitePlant, assetDevice, alarmTextCode, timestamp."
 ].join(" ");
@@ -116,7 +144,7 @@ export async function POST(request: Request) {
       throw new Error("OpenAI response did not match the expected alarm extraction schema.");
     }
 
-    return NextResponse.json(normalizeAlarmExtractionResult(parsed));
+    return NextResponse.json(normalizeAlarmExtractionResult(parsed, { rawInput: payload.rawText }));
   } catch (error) {
     if (error instanceof OpenAiResponseError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

@@ -59,6 +59,12 @@ export const alarmFieldLabels: Record<keyof AlarmConfirmationFields, string> = {
   shortNote: "short note"
 };
 
+export function getAlarmFieldDisplayLabel(field: keyof AlarmConfirmationFields) {
+  const label = alarmFieldLabels[field];
+
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
 export const emptyAlarmFields: AlarmConfirmationFields = {
   sitePlant: "",
   assetDevice: "",
