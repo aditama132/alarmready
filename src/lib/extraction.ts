@@ -12,7 +12,7 @@ export type ExtractionEvidence = {
   sourceText: string;
 };
 
-export type AlarmExtractionRequiredField =
+export type AlarmExtractionField =
   | "sitePlant"
   | "assetDevice"
   | "alarmTextCode"
@@ -20,13 +20,16 @@ export type AlarmExtractionRequiredField =
   | "severity"
   | "shortNote";
 
+export type AlarmExtractionRequiredField = (typeof requiredAlarmFields)[number];
+export type AlarmExtractionConflictField = AlarmExtractionRequiredField | "severity";
+
 export type AlarmExtractionConflictCandidate = {
   value: string;
   sourceText: string;
 };
 
 export type AlarmExtractionConflict = {
-  field: AlarmExtractionRequiredField;
+  field: AlarmExtractionConflictField;
   candidates: AlarmExtractionConflictCandidate[];
 };
 
@@ -50,21 +53,34 @@ export const requiredAlarmExtractionFields: AlarmExtractionRequiredField[] = [
   ...requiredAlarmFields
 ];
 
-export const alarmExtractionConflictFieldOrder: AlarmExtractionRequiredField[] = [
+export const blockingAlarmExtractionConflictFields: AlarmExtractionRequiredField[] = [
+  ...requiredAlarmExtractionFields
+];
+
+export const informationalAlarmExtractionConflictFields: AlarmExtractionConflictField[] = [
+  "severity"
+];
+
+export const conflictEligibleAlarmExtractionFields: AlarmExtractionConflictField[] = [
+  ...blockingAlarmExtractionConflictFields,
+  ...informationalAlarmExtractionConflictFields
+];
+
+export const alarmExtractionConflictFieldOrder: AlarmExtractionConflictField[] = [
   "sitePlant",
   "assetDevice",
   "alarmTextCode",
   "timestamp",
-  "severity",
-  "shortNote"
+  "severity"
 ];
 
 type AlarmExtractionNormalizationOptions = {
   rawInput?: string;
   requiredFields?: readonly AlarmExtractionRequiredField[];
+  conflictFields?: readonly AlarmExtractionConflictField[];
 };
 
-const alarmExtractionLabelAliases: Record<AlarmExtractionRequiredField, string[]> = {
+const alarmExtractionLabelAliases: Record<AlarmExtractionField, string[]> = {
   sitePlant: ["site/plant", "site", "plant", "site name", "plant name"],
   assetDevice: [
     "asset/device",
@@ -218,8 +234,9 @@ export function normalizeAlarmExtractionResult(
   options: AlarmExtractionNormalizationOptions = {}
 ): AlarmExtractionResult {
   const requiredFields = options.requiredFields ?? requiredAlarmExtractionFields;
+  const conflictFields = options.conflictFields ?? conflictEligibleAlarmExtractionFields;
   const conflicts = options.rawInput
-    ? findAlarmExtractionConflicts(options.rawInput, requiredFields)
+    ? findAlarmExtractionConflicts(options.rawInput, conflictFields)
     : extraction.conflicts;
   const conflictedFields = conflicts.map((conflict) => conflict.field);
   const conflictGuardedExtraction =
@@ -238,8 +255,8 @@ export function normalizeAlarmExtractionResult(
 }
 
 export function computeMissingAlarmExtractionFields(
-  extraction: Partial<Pick<AlarmExtractionResult, AlarmExtractionRequiredField>>,
-  requiredFields: readonly AlarmExtractionRequiredField[] = requiredAlarmExtractionFields
+  extraction: Partial<Pick<AlarmExtractionResult, AlarmExtractionField>>,
+  requiredFields: readonly AlarmExtractionField[] = requiredAlarmExtractionFields
 ) {
   return requiredFields.filter((field) => !hasRequiredExtractionValue(extraction[field]));
 }
@@ -269,18 +286,18 @@ function hasRequiredExtractionValue(value: string | null | undefined) {
 
 export function findConflictedAlarmExtractionFields(
   rawInput: string,
-  requiredFields: readonly AlarmExtractionRequiredField[] = requiredAlarmExtractionFields
-): AlarmExtractionRequiredField[] {
-  return findAlarmExtractionConflicts(rawInput, requiredFields).map((conflict) => conflict.field);
+  conflictFields: readonly AlarmExtractionConflictField[] = conflictEligibleAlarmExtractionFields
+): AlarmExtractionConflictField[] {
+  return findAlarmExtractionConflicts(rawInput, conflictFields).map((conflict) => conflict.field);
 }
 
 export function findAlarmExtractionConflicts(
   rawInput: string,
-  requiredFields: readonly AlarmExtractionRequiredField[] = requiredAlarmExtractionFields
+  conflictFields: readonly AlarmExtractionConflictField[] = conflictEligibleAlarmExtractionFields
 ): AlarmExtractionConflict[] {
-  const candidatesByField = getLabelledAlarmExtractionCandidates(rawInput, requiredFields);
+  const candidatesByField = getLabelledAlarmExtractionCandidates(rawInput, conflictFields);
 
-  return requiredFields.flatMap((field) => {
+  return conflictFields.flatMap((field) => {
     const candidates = candidatesByField.get(field) ?? [];
     const uniqueCandidates = dedupeAlarmExtractionConflictCandidates(candidates);
 
@@ -296,11 +313,11 @@ export function getFirstAlarmExtractionConflict(
     .find((conflict): conflict is AlarmExtractionConflict => Boolean(conflict));
 }
 
-export function getAlarmExtractionConflictElementId(field: AlarmExtractionRequiredField) {
+export function getAlarmExtractionConflictElementId(field: AlarmExtractionConflictField) {
   return `alarm-extraction-conflict-${field}`;
 }
 
-export function getAlarmExtractionFieldInputId(field: AlarmExtractionRequiredField) {
+export function getAlarmExtractionFieldInputId(field: AlarmExtractionField) {
   return `alarm-extraction-field-${field}`;
 }
 
@@ -328,10 +345,10 @@ export function shouldShowAlarmExtractionMissingState(
 
 function getLabelledAlarmExtractionCandidates(
   rawInput: string,
-  trackedFields: readonly AlarmExtractionRequiredField[]
+  trackedFields: readonly AlarmExtractionConflictField[]
 ) {
   const trackedFieldSet = new Set(trackedFields);
-  const candidatesByField = new Map<AlarmExtractionRequiredField, AlarmExtractionConflictCandidate[]>();
+  const candidatesByField = new Map<AlarmExtractionConflictField, AlarmExtractionConflictCandidate[]>();
 
   rawInput.split(/\r?\n/).forEach((line) => {
     const match = line.match(/^\s*([^:|=,]+)\s*[:|=,]\s*(.+?)\s*$/);
@@ -343,7 +360,12 @@ function getLabelledAlarmExtractionCandidates(
     const field = getAlarmExtractionFieldFromLabel(match[1]);
     const value = match[2].trim();
 
-    if (!field || !trackedFieldSet.has(field) || !value) {
+    if (
+      !field ||
+      !isAlarmExtractionConflictFieldName(field) ||
+      !trackedFieldSet.has(field) ||
+      !value
+    ) {
       return;
     }
 
@@ -381,7 +403,7 @@ function dedupeAlarmExtractionConflictCandidates(
 
 function clearConflictedExtractionFields(
   extraction: AlarmExtractionResult,
-  conflictedFields: readonly AlarmExtractionRequiredField[]
+  conflictedFields: readonly AlarmExtractionConflictField[]
 ) {
   const nextExtraction = { ...extraction };
 
@@ -395,7 +417,7 @@ function clearConflictedExtractionFields(
 function filterAlarmExtractionEvidence(
   extraction: AlarmExtractionResult,
   rawInput: string,
-  conflictedFields: readonly AlarmExtractionRequiredField[]
+  conflictedFields: readonly AlarmExtractionConflictField[]
 ): AlarmExtractionResult {
   const conflictedFieldSet = new Set(conflictedFields);
 
@@ -405,7 +427,7 @@ function filterAlarmExtractionEvidence(
       const field = getAlarmExtractionFieldFromLabel(evidence.field);
 
       return (
-        (!field || !conflictedFieldSet.has(field)) &&
+        (!field || !isAlarmExtractionConflictFieldName(field) || !conflictedFieldSet.has(field)) &&
         Boolean(evidence.sourceText) &&
         rawInput.includes(evidence.sourceText)
       );
@@ -413,11 +435,11 @@ function filterAlarmExtractionEvidence(
   };
 }
 
-function getAlarmExtractionFieldFromLabel(label: string): AlarmExtractionRequiredField | null {
+function getAlarmExtractionFieldFromLabel(label: string): AlarmExtractionField | null {
   const normalizedLabel = normalizeLabel(label);
 
   for (const [field, aliases] of Object.entries(alarmExtractionLabelAliases) as Array<
-    [AlarmExtractionRequiredField, string[]]
+    [AlarmExtractionField, string[]]
   >) {
     if (aliases.some((alias) => normalizeLabel(alias) === normalizedLabel)) {
       return field;
@@ -584,7 +606,7 @@ export function isOperatingContextExtractionResult(
   );
 }
 
-function normalizeExtractedSeverity(value: string | null): AlarmConfirmationFields["severity"] {
+export function normalizeExtractedSeverity(value: string | null): AlarmConfirmationFields["severity"] {
   const normalized = value?.toLowerCase().trim() ?? "";
 
   if (normalized.includes("critical") || normalized === "high") {
@@ -694,7 +716,7 @@ function isExtractionEvidence(value: unknown): value is ExtractionEvidence {
 function isAlarmExtractionConflict(value: unknown): value is AlarmExtractionConflict {
   return (
     isRecord(value) &&
-    isAlarmExtractionRequiredField(value.field) &&
+    isAlarmExtractionConflictFieldName(value.field) &&
     Array.isArray(value.candidates) &&
     value.candidates.every(isAlarmExtractionConflictCandidate)
   );
@@ -710,10 +732,10 @@ function isAlarmExtractionConflictCandidate(
   );
 }
 
-function isAlarmExtractionRequiredField(value: unknown): value is AlarmExtractionRequiredField {
+function isAlarmExtractionConflictFieldName(value: unknown): value is AlarmExtractionConflictField {
   return (
     typeof value === "string" &&
-    Object.prototype.hasOwnProperty.call(alarmExtractionLabelAliases, value)
+    conflictEligibleAlarmExtractionFields.some((field) => field === value)
   );
 }
 
