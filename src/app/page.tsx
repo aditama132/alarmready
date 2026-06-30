@@ -66,6 +66,7 @@ import {
   emptyContextInput,
   getAlarmFieldDisplayLabel,
   normalizeInput,
+  requiredAlarmFields,
   validateAlarmFields
 } from "@/lib/input-normalizer";
 import type {
@@ -232,14 +233,17 @@ export default function Home() {
 
   const manualValidation = validateAlarmFields(manualFields);
   const extractedValidation = validateAlarmFields(extractedFields);
-  const unresolvedAlarmConflictFields = new Set(
-    alarmExtractionConflicts.map((conflict) => conflict.field)
+  const unresolvedBlockingAlarmConflicts = alarmExtractionConflicts.filter((conflict) =>
+    requiredAlarmFields.some((field) => field === conflict.field)
+  );
+  const unresolvedBlockingAlarmConflictFields = new Set(
+    unresolvedBlockingAlarmConflicts.map((conflict) => conflict.field)
   );
   const genericMissingExtractedFields = extractedValidation.missingFields.filter(
-    (field) => !unresolvedAlarmConflictFields.has(field)
+    (field) => !unresolvedBlockingAlarmConflictFields.has(field)
   );
-  const unresolvedAlarmConflictCount = alarmExtractionConflicts.length;
-  const hasUnresolvedAlarmConflicts = unresolvedAlarmConflictCount > 0;
+  const unresolvedAlarmConflictCount = unresolvedBlockingAlarmConflicts.length;
+  const hasUnresolvedBlockingAlarmConflicts = unresolvedAlarmConflictCount > 0;
   const alarmConflictNoticeCopy = getAlarmExtractionConflictNoticeCopy(
     unresolvedAlarmConflictCount
   );
@@ -1115,7 +1119,7 @@ export default function Home() {
   const useExtractedAlarm = () => {
     if (
       !extractedValidation.isValid ||
-      hasUnresolvedAlarmConflicts ||
+      hasUnresolvedBlockingAlarmConflicts ||
       !isExtractionConfirmable(alarmExtractionWorkflowStatus)
     ) {
       return;
@@ -1737,7 +1741,7 @@ export default function Home() {
   };
 
   const focusFirstAlarmExtractionConflict = () => {
-    const firstConflict = getFirstAlarmExtractionConflict(alarmExtractionConflicts);
+    const firstConflict = getFirstAlarmExtractionConflict(unresolvedBlockingAlarmConflicts);
 
     if (!firstConflict) {
       return;
@@ -1746,6 +1750,16 @@ export default function Home() {
     const element = document.getElementById(
       getAlarmExtractionConflictElementId(firstConflict.field)
     );
+
+    if (!element) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("Blocking alarm extraction conflict has no rendered resolver target.", {
+          field: firstConflict.field
+        });
+      }
+
+      return;
+    }
 
     element?.scrollIntoView({ behavior: "smooth", block: "center" });
 
@@ -2123,7 +2137,7 @@ export default function Home() {
                 </dl>
               ) : null}
             </div>
-            {hasUnresolvedAlarmConflicts ? (
+            {hasUnresolvedBlockingAlarmConflicts ? (
               <div
                 className="inlineConflictNotice"
                 id="alarm-conflict-confirm-blocker"
@@ -2144,11 +2158,13 @@ export default function Home() {
                 type="button"
                 className="primaryButton"
                 aria-describedby={
-                  hasUnresolvedAlarmConflicts ? "alarm-conflict-confirm-blocker" : undefined
+                  hasUnresolvedBlockingAlarmConflicts
+                    ? "alarm-conflict-confirm-blocker"
+                    : undefined
                 }
                 disabled={
                   !extractedValidation.isValid ||
-                  hasUnresolvedAlarmConflicts ||
+                  hasUnresolvedBlockingAlarmConflicts ||
                   !isExtractionConfirmable(alarmExtractionWorkflowStatus)
                 }
                 onClick={useExtractedAlarm}

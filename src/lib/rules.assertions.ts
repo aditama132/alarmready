@@ -17,7 +17,11 @@ import {
   normalizeAlarmExtractionResult
 } from "./extraction";
 import type { AlarmExtractionResult } from "./extraction";
-import { getAlarmFieldDisplayLabel, normalizeInput } from "./input-normalizer";
+import {
+  getAlarmFieldDisplayLabel,
+  normalizeInput,
+  requiredAlarmFields
+} from "./input-normalizer";
 import { contextAwareExample, quickModeExample } from "./sampleData";
 import { checkRelatedWork, normalizePriority, runRuleEngine } from "./rules";
 import type { PriorityInput } from "./rules";
@@ -425,6 +429,72 @@ export function runRuleAssertions() {
       ) &&
       getAlarmExtractionFieldInputId("timestamp") === "alarm-extraction-field-timestamp",
     "manual conflict resolution copy uses user-facing labels and stable field input ids"
+  );
+  const optionalSeverityConflict = {
+    field: "severity" as const,
+    candidates: [
+      {
+        value: "Warning",
+        sourceText: "severity: Warning"
+      },
+      {
+        value: "Critical",
+        sourceText: "severity: Critical"
+      }
+    ]
+  };
+  const optionalShortNoteConflict = {
+    field: "shortNote" as const,
+    candidates: [
+      {
+        value: "First note",
+        sourceText: "short note: First note"
+      },
+      {
+        value: "Second note",
+        sourceText: "short note: Second note"
+      }
+    ]
+  };
+  const blockingAssetConflict = {
+    field: "assetDevice" as const,
+    candidates: [
+      {
+        value: "INV-07",
+        sourceText: "asset/device: INV-07"
+      },
+      {
+        value: "INV-08",
+        sourceText: "asset/device: INV-08"
+      }
+    ]
+  };
+  const isRequiredConflictField = (field: string) =>
+    requiredAlarmFields.some((requiredField) => requiredField === field);
+  const optionalOnlyBlockingConflicts = [
+    optionalSeverityConflict,
+    optionalShortNoteConflict
+  ].filter((conflict) => isRequiredConflictField(conflict.field));
+  const mixedBlockingConflicts = [
+    optionalSeverityConflict,
+    blockingAssetConflict
+  ].filter((conflict) => isRequiredConflictField(conflict.field));
+  assert(
+    optionalOnlyBlockingConflicts.length === 0 &&
+      mixedBlockingConflicts.length === 1 &&
+      getAlarmExtractionConflictNoticeCopy(mixedBlockingConflicts.length).message ===
+        "Resolve 1 conflicting field above to continue." &&
+      getFirstAlarmExtractionConflict(mixedBlockingConflicts)?.field === "assetDevice",
+    "optional alarm extraction conflicts are excluded from confirmation blocking and review targeting"
+  );
+  assert(
+    requiredAlarmFields.every(
+      (field) =>
+        getAlarmExtractionConflictElementId(field) ===
+          `alarm-extraction-conflict-${field}` &&
+        getAlarmExtractionFieldInputId(field) === `alarm-extraction-field-${field}`
+    ),
+    "every required alarm field has stable resolver and input targets"
   );
   const injectionRawInput = [
     "site/plant: Sierra Verde Solar PV",
