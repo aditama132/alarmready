@@ -640,6 +640,9 @@ export default function Home() {
     value: string
   ) => {
     updateAlarmExtractionDraftField(field, value as AlarmExtractionDraftFields[K]);
+    window.requestAnimationFrame(() => {
+      focusAlarmExtractionField(field, { scroll: false });
+    });
   };
 
   const updateContext = (
@@ -1769,10 +1772,16 @@ export default function Home() {
     }
   };
 
-  const focusAlarmExtractionField = (field: AlarmExtractionConflict["field"]) => {
+  const focusAlarmExtractionField = (
+    field: AlarmExtractionConflict["field"],
+    options: { scroll?: boolean } = {}
+  ) => {
     const element = document.getElementById(getAlarmExtractionFieldInputId(field));
+    const shouldScroll = options.scroll ?? true;
 
-    element?.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (shouldScroll) {
+      element?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
 
     if (
       element instanceof HTMLInputElement ||
