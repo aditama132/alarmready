@@ -8,14 +8,16 @@ import {
   findAlarmExtractionConflicts,
   findConflictedAlarmExtractionFields,
   getAlarmExtractionConflictElementId,
+  getAlarmExtractionFieldInputId,
   getAlarmExtractionConflictNoticeCopy,
+  getAlarmExtractionManualEntryCopy,
   getFirstAlarmExtractionConflict,
   mapAlarmExtractionDraftToFields,
   mapAlarmExtractionToDraft,
   normalizeAlarmExtractionResult
 } from "./extraction";
 import type { AlarmExtractionResult } from "./extraction";
-import { normalizeInput } from "./input-normalizer";
+import { getAlarmFieldDisplayLabel, normalizeInput } from "./input-normalizer";
 import { contextAwareExample, quickModeExample } from "./sampleData";
 import { checkRelatedWork, normalizePriority, runRuleEngine } from "./rules";
 import type { PriorityInput } from "./rules";
@@ -413,6 +415,16 @@ export function runRuleAssertions() {
       getAlarmExtractionConflictElementId("assetDevice") ===
         "alarm-extraction-conflict-assetDevice",
     "conflict review targets the first unresolved field in form order"
+  );
+  assert(
+    getAlarmFieldDisplayLabel("assetDevice") === "Asset/device" &&
+      getAlarmExtractionManualEntryCopy(getAlarmFieldDisplayLabel("assetDevice")) ===
+        "Select the correct value below, or type a different value in the Asset/device field above." &&
+      !getAlarmExtractionManualEntryCopy(getAlarmFieldDisplayLabel("assetDevice")).includes(
+        "assetDevice"
+      ) &&
+      getAlarmExtractionFieldInputId("timestamp") === "alarm-extraction-field-timestamp",
+    "manual conflict resolution copy uses user-facing labels and stable field input ids"
   );
   const injectionRawInput = [
     "site/plant: Sierra Verde Solar PV",

@@ -300,6 +300,10 @@ export function getAlarmExtractionConflictElementId(field: AlarmExtractionRequir
   return `alarm-extraction-conflict-${field}`;
 }
 
+export function getAlarmExtractionFieldInputId(field: AlarmExtractionRequiredField) {
+  return `alarm-extraction-field-${field}`;
+}
+
 export function getAlarmExtractionConflictNoticeCopy(conflictCount: number) {
   const normalizedCount = Math.max(0, conflictCount);
 
@@ -309,6 +313,10 @@ export function getAlarmExtractionConflictNoticeCopy(conflictCount: number) {
     } above to continue.`,
     actionLabel: normalizedCount === 1 ? "Review conflict" : "Review conflicts"
   };
+}
+
+export function getAlarmExtractionManualEntryCopy(fieldLabel: string) {
+  return `Select the correct value below, or type a different value in the ${fieldLabel} field above.`;
 }
 
 function getLabelledAlarmExtractionCandidates(

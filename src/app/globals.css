@@ -406,6 +406,10 @@ button svg {
   margin: 3px 0 0;
 }
 
+.alarmConflictManualEntryButton {
+  margin: 6px 0 0;
+}
+
 .alarmConflictResolver:focus {
   outline: 3px solid rgba(180, 125, 30, 0.24);
   outline-offset: 3px;

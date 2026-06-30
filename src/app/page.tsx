@@ -36,7 +36,9 @@ import {
   formatExtractedRecentAlarms,
   formatExtractedWorkRecords,
   getAlarmExtractionConflictElementId,
+  getAlarmExtractionFieldInputId,
   getAlarmExtractionConflictNoticeCopy,
+  getAlarmExtractionManualEntryCopy,
   getFirstAlarmExtractionConflict,
   isAlarmExtractionResult,
   isOperatingContextExtractionResult,
@@ -62,6 +64,7 @@ import {
   emptyAdvancedAlarmDetails,
   emptyAlarmFields,
   emptyContextInput,
+  getAlarmFieldDisplayLabel,
   normalizeInput,
   validateAlarmFields
 } from "@/lib/input-normalizer";
@@ -1751,6 +1754,20 @@ export default function Home() {
     }
   };
 
+  const focusAlarmExtractionField = (field: AlarmExtractionConflict["field"]) => {
+    const element = document.getElementById(getAlarmExtractionFieldInputId(field));
+
+    element?.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    if (
+      element instanceof HTMLInputElement ||
+      element instanceof HTMLSelectElement ||
+      element instanceof HTMLTextAreaElement
+    ) {
+      element.focus();
+    }
+  };
+
   const updateSelectedDecision = (selectedDecision: TriageDecision | "") => {
     const decisionChanged = selectedDecision !== decisionState.selectedDecision;
     const hasPreservedNote = decisionState.validationNote.trim().length > 0;
@@ -1991,6 +2008,7 @@ export default function Home() {
               <AlarmExtractionDraftField
                 label="site/plant"
                 field="sitePlant"
+                id={getAlarmExtractionFieldInputId("sitePlant")}
                 draft={alarmExtractionDraft}
                 missing={!alarmExtractionDraft.sitePlant.trim()}
                 onChange={updateAlarmExtractionDraftField}
@@ -1999,12 +2017,14 @@ export default function Home() {
                 conflict={alarmExtractionConflicts.find(
                   (conflict) => conflict.field === "sitePlant"
                 )}
-                label="site/plant"
+                label={getAlarmFieldDisplayLabel("sitePlant")}
+                onManualEntry={focusAlarmExtractionField}
                 onSelect={resolveAlarmExtractionConflict}
               />
               <AlarmExtractionDraftField
                 label="asset/device"
                 field="assetDevice"
+                id={getAlarmExtractionFieldInputId("assetDevice")}
                 draft={alarmExtractionDraft}
                 missing={!alarmExtractionDraft.assetDevice.trim()}
                 onChange={updateAlarmExtractionDraftField}
@@ -2013,12 +2033,14 @@ export default function Home() {
                 conflict={alarmExtractionConflicts.find(
                   (conflict) => conflict.field === "assetDevice"
                 )}
-                label="asset/device"
+                label={getAlarmFieldDisplayLabel("assetDevice")}
+                onManualEntry={focusAlarmExtractionField}
                 onSelect={resolveAlarmExtractionConflict}
               />
               <AlarmExtractionDraftField
                 label="alarm text/code"
                 field="alarmTextCode"
+                id={getAlarmExtractionFieldInputId("alarmTextCode")}
                 draft={alarmExtractionDraft}
                 missing={!alarmExtractionDraft.alarmTextCode.trim()}
                 onChange={updateAlarmExtractionDraftField}
@@ -2027,12 +2049,14 @@ export default function Home() {
                 conflict={alarmExtractionConflicts.find(
                   (conflict) => conflict.field === "alarmTextCode"
                 )}
-                label="alarm text/code"
+                label={getAlarmFieldDisplayLabel("alarmTextCode")}
+                onManualEntry={focusAlarmExtractionField}
                 onSelect={resolveAlarmExtractionConflict}
               />
               <AlarmExtractionDraftField
                 label="timestamp"
                 field="timestamp"
+                id={getAlarmExtractionFieldInputId("timestamp")}
                 draft={alarmExtractionDraft}
                 missing={!alarmExtractionDraft.timestamp.trim()}
                 onChange={updateAlarmExtractionDraftField}
@@ -2041,12 +2065,14 @@ export default function Home() {
                 conflict={alarmExtractionConflicts.find(
                   (conflict) => conflict.field === "timestamp"
                 )}
-                label="timestamp"
+                label={getAlarmFieldDisplayLabel("timestamp")}
+                onManualEntry={focusAlarmExtractionField}
                 onSelect={resolveAlarmExtractionConflict}
               />
-              <label>
+              <label htmlFor={getAlarmExtractionFieldInputId("severity")}>
                 <span>Severity</span>
                 <select
+                  id={getAlarmExtractionFieldInputId("severity")}
                   value={alarmExtractionDraft.severity}
                   onChange={(event) =>
                     updateAlarmExtractionDraftField(
@@ -2064,6 +2090,7 @@ export default function Home() {
               <AlarmExtractionDraftField
                 label="short note"
                 field="shortNote"
+                id={getAlarmExtractionFieldInputId("shortNote")}
                 draft={alarmExtractionDraft}
                 onChange={updateAlarmExtractionDraftField}
               />
@@ -4572,15 +4599,19 @@ function MissingFields({
 function AlarmExtractionConflictResolver({
   conflict,
   label,
+  onManualEntry,
   onSelect
 }: {
   conflict: AlarmExtractionConflict | undefined;
   label: string;
+  onManualEntry: (field: AlarmExtractionConflict["field"]) => void;
   onSelect: (field: AlarmExtractionConflict["field"], value: string) => void;
 }) {
   if (!conflict) {
     return null;
   }
+
+  const descriptionId = `${getAlarmExtractionConflictElementId(conflict.field)}-description`;
 
   return (
     <div
@@ -4588,14 +4619,19 @@ function AlarmExtractionConflictResolver({
       id={getAlarmExtractionConflictElementId(conflict.field)}
       role="group"
       tabIndex={-1}
+      aria-describedby={descriptionId}
       aria-label={`Conflicting ${label} values found`}
     >
       <div>
         <strong>Conflicting {label} values found</strong>
-        <p>
-          The pasted source contains more than one value. Select the correct value or enter it
-          manually.
-        </p>
+        <p id={descriptionId}>{getAlarmExtractionManualEntryCopy(label)}</p>
+        <button
+          type="button"
+          className="inlineTextButton alarmConflictManualEntryButton"
+          onClick={() => onManualEntry(conflict.field)}
+        >
+          Enter a different value
+        </button>
       </div>
       <div className="alarmConflictCandidateList">
         {conflict.candidates.map((candidate) => (
@@ -4617,12 +4653,14 @@ function AlarmExtractionConflictResolver({
 function AlarmExtractionDraftField({
   label,
   field,
+  id,
   draft,
   missing,
   onChange
 }: {
   label: string;
   field: Exclude<keyof AlarmExtractionDraftFields, "severity" | "confidence">;
+  id?: string;
   draft: AlarmExtractionDraftFields;
   missing?: boolean;
   onChange: <K extends keyof AlarmExtractionDraftFields>(
@@ -4633,6 +4671,7 @@ function AlarmExtractionDraftField({
   return (
     <EditableField
       label={label}
+      id={id}
       value={draft[field]}
       missing={missing}
       onChange={(value) => onChange(field, value)}
@@ -4642,22 +4681,24 @@ function AlarmExtractionDraftField({
 
 function EditableField({
   label,
+  id,
   value,
   missing,
   onChange
 }: {
   label: string;
+  id?: string;
   value: string;
   missing?: boolean;
   onChange: (value: string) => void;
 }) {
   return (
-    <label>
+    <label htmlFor={id}>
       <span>
         {label}
         {missing ? <em>Missing</em> : null}
       </span>
-      <input value={value} onChange={(event) => onChange(event.target.value)} />
+      <input id={id} value={value} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }
