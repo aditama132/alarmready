@@ -45,7 +45,8 @@ import {
   isRecentAlarmExtractionResult,
   isWorkRecordExtractionResult,
   mapAlarmExtractionDraftToFields,
-  mapAlarmExtractionToDraft
+  mapAlarmExtractionToDraft,
+  shouldShowAlarmExtractionMissingState
 } from "@/lib/extraction";
 import type {
   AlarmExtractionConflict,
@@ -2024,7 +2025,10 @@ export default function Home() {
                 field="sitePlant"
                 id={getAlarmExtractionFieldInputId("sitePlant")}
                 draft={alarmExtractionDraft}
-                missing={!alarmExtractionDraft.sitePlant.trim()}
+                missing={shouldShowAlarmExtractionMissingState(
+                  alarmExtractionDraft.sitePlant,
+                  unresolvedBlockingAlarmConflictFields.has("sitePlant")
+                )}
                 onChange={updateAlarmExtractionDraftField}
               />
               <AlarmExtractionConflictResolver
@@ -2040,7 +2044,10 @@ export default function Home() {
                 field="assetDevice"
                 id={getAlarmExtractionFieldInputId("assetDevice")}
                 draft={alarmExtractionDraft}
-                missing={!alarmExtractionDraft.assetDevice.trim()}
+                missing={shouldShowAlarmExtractionMissingState(
+                  alarmExtractionDraft.assetDevice,
+                  unresolvedBlockingAlarmConflictFields.has("assetDevice")
+                )}
                 onChange={updateAlarmExtractionDraftField}
               />
               <AlarmExtractionConflictResolver
@@ -2056,7 +2063,10 @@ export default function Home() {
                 field="alarmTextCode"
                 id={getAlarmExtractionFieldInputId("alarmTextCode")}
                 draft={alarmExtractionDraft}
-                missing={!alarmExtractionDraft.alarmTextCode.trim()}
+                missing={shouldShowAlarmExtractionMissingState(
+                  alarmExtractionDraft.alarmTextCode,
+                  unresolvedBlockingAlarmConflictFields.has("alarmTextCode")
+                )}
                 onChange={updateAlarmExtractionDraftField}
               />
               <AlarmExtractionConflictResolver
@@ -2072,7 +2082,10 @@ export default function Home() {
                 field="timestamp"
                 id={getAlarmExtractionFieldInputId("timestamp")}
                 draft={alarmExtractionDraft}
-                missing={!alarmExtractionDraft.timestamp.trim()}
+                missing={shouldShowAlarmExtractionMissingState(
+                  alarmExtractionDraft.timestamp,
+                  unresolvedBlockingAlarmConflictFields.has("timestamp")
+                )}
                 onChange={updateAlarmExtractionDraftField}
               />
               <AlarmExtractionConflictResolver

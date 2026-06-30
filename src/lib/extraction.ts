@@ -319,6 +319,13 @@ export function getAlarmExtractionManualEntryCopy(fieldLabel: string) {
   return `Select the correct value below, or type a different value in the ${fieldLabel} field above.`;
 }
 
+export function shouldShowAlarmExtractionMissingState(
+  value: string,
+  hasUnresolvedConflict: boolean
+) {
+  return !value.trim() && !hasUnresolvedConflict;
+}
+
 function getLabelledAlarmExtractionCandidates(
   rawInput: string,
   trackedFields: readonly AlarmExtractionRequiredField[]

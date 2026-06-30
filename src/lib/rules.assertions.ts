@@ -14,7 +14,8 @@ import {
   getFirstAlarmExtractionConflict,
   mapAlarmExtractionDraftToFields,
   mapAlarmExtractionToDraft,
-  normalizeAlarmExtractionResult
+  normalizeAlarmExtractionResult,
+  shouldShowAlarmExtractionMissingState
 } from "./extraction";
 import type { AlarmExtractionResult } from "./extraction";
 import {
@@ -495,6 +496,14 @@ export function runRuleAssertions() {
         getAlarmExtractionFieldInputId(field) === `alarm-extraction-field-${field}`
     ),
     "every required alarm field has stable resolver and input targets"
+  );
+  assert(
+    shouldShowAlarmExtractionMissingState("", false) &&
+      shouldShowAlarmExtractionMissingState("   ", false) &&
+      !shouldShowAlarmExtractionMissingState("", true) &&
+      !shouldShowAlarmExtractionMissingState("INV-07", true) &&
+      !shouldShowAlarmExtractionMissingState("INV-07", false),
+    "field-level conflict state suppresses generic missing presentation until conflict is cleared"
   );
   const injectionRawInput = [
     "site/plant: Sierra Verde Solar PV",
